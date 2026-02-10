@@ -62,6 +62,10 @@ class EndpointExtractionStrategyFactory:
                 from .anyframe_sarangon_endpoint_extraction import AnyframeSarangOnEndpointExtraction
 
                 return AnyframeSarangOnEndpointExtraction(java_parser=java_parser, cache_manager=cache_manager)
+            elif config.app_key == "sarangon_batch":
+                from .anyframe_bat_etc_endpoint_extraction import AnyframeBatEtcEndpointExtraction
+
+                return AnyframeBatEtcEndpointExtraction(java_parser=java_parser, cache_manager=cache_manager)
             else:
                 from .anyframe_endpoint_extraction import AnyframeEndpointExtraction
 
