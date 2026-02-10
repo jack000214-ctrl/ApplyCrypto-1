@@ -113,6 +113,7 @@ class Configuration(BaseModel):
     )
     framework_type: Literal[
         "SpringMVC",
+        "Anyframe",
         "AnyframeSarangOn",
         "AnyframeOld",
         "AnyframeEtc",

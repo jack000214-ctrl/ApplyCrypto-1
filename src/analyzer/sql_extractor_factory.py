@@ -38,9 +38,10 @@ class SQLExtractorFactory:
             ValueError: 지원하지 않는 sql_wrapping_type인 경우
         """
         sql_wrapping_type = config.sql_wrapping_type.lower()
+        app_key = config.app_key
 
         if sql_wrapping_type == "mybatis":
-            if config.app_key and config.app_key.startswith('digital_channel') :
+            if app_key == 'digital_channel' or app_key == 'digital_channel_batch':
                 from .sql_extractors.mybatis_digital_channel_sql_extractor import MyBatisDigitalChannelSQLExtractor
                 return MyBatisDigitalChannelSQLExtractor(
                     config=config,
@@ -48,7 +49,7 @@ class SQLExtractorFactory:
                     java_parse_results=java_parse_results,
                     call_graph_builder=call_graph_builder,
                 )
-            elif config.app_key == 'direct':
+            elif app_key == 'direct':
                 from .sql_extractors.mybatis_direct_sql_extractor import MyBatisDirectSQLExtractor
                 return MyBatisDirectSQLExtractor(
                     config=config,

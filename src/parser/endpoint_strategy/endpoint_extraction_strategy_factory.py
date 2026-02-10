@@ -57,11 +57,15 @@ class EndpointExtractionStrategyFactory:
 
                 return SpringMVCEndpointExtraction(java_parser=java_parser, cache_manager=cache_manager)
 
-        elif framework_type == "AnyframeSarangOn":
-            # TODO: 추후 구현
-            from .anyframe_sarangon_endpoint_extraction import AnyframeSarangOnEndpointExtraction
+        elif framework_type == "Anyframe":
+            if config.app_key == "sarangon":
+                from .anyframe_sarangon_endpoint_extraction import AnyframeSarangOnEndpointExtraction
 
-            return AnyframeSarangOnEndpointExtraction(java_parser=java_parser, cache_manager=cache_manager)
+                return AnyframeSarangOnEndpointExtraction(java_parser=java_parser, cache_manager=cache_manager)
+            else:
+                from .anyframe_endpoint_extraction import AnyframeEndpointExtraction
+
+                return AnyframeEndpointExtraction(java_parser=java_parser, cache_manager=cache_manager)
             
         elif framework_type == "AnyframeOld":
             # TODO: 추후 구현
