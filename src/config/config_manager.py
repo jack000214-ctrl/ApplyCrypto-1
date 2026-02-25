@@ -113,7 +113,11 @@ class Configuration(BaseModel):
     )
     framework_type: Literal[
         "SpringMVC",
-        "AnyframeSarangOn",
+        "SpringDirect",
+        "SpringDigitalChannel",
+        "Anyframe",
+        "AnyframeSarangon",
+        "AnyframeSarangonBatch",
         "AnyframeOld",
         "AnyframeEtc",
         "AnyframeCCS",
@@ -166,7 +170,6 @@ class Configuration(BaseModel):
         description="CCS 프로젝트 prefix. 유틸리티 클래스 결정에 사용 "
         "(BC→BCCommUtil, CP→CPCmpgnUtil, CR→CRCommonUtil)",
     )
-    app_key: Optional[str] = Field(None, description="애플리케이션 키")
 
     def get_table_names(self) -> List[str]:
         """
