@@ -40,31 +40,35 @@ class SQLExtractorFactory:
         sql_wrapping_type = config.sql_wrapping_type.lower()
 
         if sql_wrapping_type == "mybatis":
-            if config.app_key and config.app_key.startswith('digital_channel') :
-                from .sql_extractors.mybatis_digital_channel_sql_extractor import MyBatisDigitalChannelSQLExtractor
-                return MyBatisDigitalChannelSQLExtractor(
-                    config=config,
-                    xml_parser=xml_parser,
-                    java_parse_results=java_parse_results,
-                    call_graph_builder=call_graph_builder,
-                )
-            elif config.app_key == 'direct':
-                from .sql_extractors.mybatis_direct_sql_extractor import MyBatisDirectSQLExtractor
-                return MyBatisDirectSQLExtractor(
-                    config=config,
-                    xml_parser=xml_parser,
-                    java_parse_results=java_parse_results,
-                    call_graph_builder=call_graph_builder,
-                )
-            else:
-                from .sql_extractors.mybatis_sql_extractor import MyBatisSQLExtractor
+            from .sql_extractors.mybatis_sql_extractor import MyBatisSQLExtractor
 
-                return MyBatisSQLExtractor(
-                    config=config,
-                    xml_parser=xml_parser,
-                    java_parse_results=java_parse_results,
-                    call_graph_builder=call_graph_builder,
-                )
+            return MyBatisSQLExtractor(
+                config=config,
+                xml_parser=xml_parser,
+                java_parse_results=java_parse_results,
+                call_graph_builder=call_graph_builder,
+            )
+        
+        elif sql_wrapping_type == "mybatis_direct":
+            from .sql_extractors.mybatis_direct_sql_extractor import MyBatisDirectSQLExtractor
+
+            return MyBatisDirectSQLExtractor(
+                config=config,
+                xml_parser=xml_parser,
+                java_parse_results=java_parse_results,
+                call_graph_builder=call_graph_builder,
+            )
+
+        elif sql_wrapping_type == "mybatis_digital_channel" or sql_wrapping_type == "mybatis_digital_channel_batch":
+            from .sql_extractors.mybatis_digital_channel_sql_extractor import MyBatisDigitalChannelSQLExtractor
+
+            return MyBatisDigitalChannelSQLExtractor(
+                config=config,
+                xml_parser=xml_parser,
+                java_parse_results=java_parse_results,
+                call_graph_builder=call_graph_builder,
+            )
+
 
         elif sql_wrapping_type == "mybatis_ccs":
             from .sql_extractors.mybatis_ccs_sql_extractor import MybatisCCSSQLExtractor
@@ -76,12 +80,36 @@ class SQLExtractorFactory:
                 call_graph_builder=call_graph_builder,
             )
 
-        elif sql_wrapping_type == "mybatis_ccs_batch":
-            from .sql_extractors.mybatis_ccs_batch_sql_extractor import (
-                MyBatisCCSBatchSQLExtractor,
+        elif sql_wrapping_type == "ccs_batch":
+            from .sql_extractors.ccs_batch_sql_extractor import (
+                CCSBatchSQLExtractor,
             )
 
-            return MyBatisCCSBatchSQLExtractor(
+            return CCSBatchSQLExtractor(
+                config=config,
+                xml_parser=xml_parser,
+                java_parse_results=java_parse_results,
+                call_graph_builder=call_graph_builder,
+            )
+
+        elif sql_wrapping_type == "bnk_batch":
+            from .sql_extractors.bnk_batch_sql_extractor import (
+                BNKBatchSQLExtractor,
+            )
+
+            return BNKBatchSQLExtractor(
+                config=config,
+                xml_parser=xml_parser,
+                java_parse_results=java_parse_results,
+                call_graph_builder=call_graph_builder,
+            )
+
+        elif sql_wrapping_type == "jdbc_banka":
+            from .sql_extractors.anyframe_jdbc_sql_extractor import (
+                AnyframeJDBCSQLExtractor,
+            )
+
+            return AnyframeJDBCSQLExtractor(
                 config=config,
                 xml_parser=xml_parser,
                 java_parse_results=java_parse_results,
@@ -134,5 +162,5 @@ class SQLExtractorFactory:
         else:
             raise ValueError(
                 f"지원하지 않는 sql_wrapping_type: {config.sql_wrapping_type}. "
-                f"가능한 값: mybatis, mybatis_ccs, mybatis_ccs_batch, jdbc, jpa"
+                f"가능한 값: mybatis, mybatis_ccs, ccs_batch, bnk_batch, jdbc, jpa"
             )

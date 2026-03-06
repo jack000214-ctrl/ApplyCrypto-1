@@ -121,6 +121,18 @@ class ConfigMigration:
                 del config_data["generate_full_source"]
             migrated = True
 
+        # 4. AnyframeSarangOn -> Anyframe 마이그레이션 (Deprecated)
+        if config_data.get("framework_type") == "AnyframeSarangOn":
+            old_values["framework_type"] = "AnyframeSarangOn"
+            new_values["framework_type"] = "Anyframe"
+            changes.append(
+                "framework_type 'AnyframeSarangOn'은 Deprecated 되었습니다. 'Anyframe'으로 변경합니다."
+            )
+            
+            config_data["framework_type"] = "Anyframe"
+            migrated = True
+
+
         # 파일 업데이트
         backup_path = None
         if update_file and migrated:

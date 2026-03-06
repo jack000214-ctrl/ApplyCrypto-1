@@ -40,28 +40,38 @@ class EndpointExtractionStrategyFactory:
         framework_type = config.framework_type
 
         if framework_type == "SpringMVC":
-            if config.app_key == "digital_channel_batch":
-                from .digital_channel_batch_endpoint_extractor import DigitalChannelBatchEndpointExtractor
+            from .spring_mvc_endpoint_extraction import SpringMVCEndpointExtraction
 
-                return DigitalChannelBatchEndpointExtractor(
-                    java_parser=java_parser, cache_manager=cache_manager
-                )
-            elif config.app_key == "direct":
-                from .direct_endpoint_extraction import DirectEndpointExtraction
+            return SpringMVCEndpointExtraction(java_parser=java_parser, cache_manager=cache_manager)
 
-                return DirectEndpointExtraction(
-                    java_parser=java_parser, cache_manager=cache_manager
-                )
-            else:
-                from .spring_mvc_endpoint_extraction import SpringMVCEndpointExtraction
+        elif framework_type == "SpringDirect":
+            from .direct_endpoint_extraction import DirectEndpointExtraction
 
-                return SpringMVCEndpointExtraction(java_parser=java_parser, cache_manager=cache_manager)
+            return DirectEndpointExtraction(
+                java_parser=java_parser, cache_manager=cache_manager
+            )
 
-        elif framework_type == "AnyframeSarangOn":
-            # TODO: 추후 구현
+        elif framework_type == "SpringDigitalChannel":
+            from .digital_channel_batch_endpoint_extractor import DigitalChannelBatchEndpointExtractor
+
+            return DigitalChannelBatchEndpointExtractor(
+                java_parser=java_parser, cache_manager=cache_manager
+            )
+
+        elif framework_type == "Anyframe":
+            from .anyframe_endpoint_extraction import AnyframeEndpointExtraction
+
+            return AnyframeEndpointExtraction(java_parser=java_parser, cache_manager=cache_manager)
+
+        elif framework_type == "AnyframeSarangon":
             from .anyframe_sarangon_endpoint_extraction import AnyframeSarangOnEndpointExtraction
 
             return AnyframeSarangOnEndpointExtraction(java_parser=java_parser, cache_manager=cache_manager)
+
+        elif framework_type == "AnyframeSarangonBatch":
+            from .anyframe_bat_etc_endpoint_extraction import AnyframeBatEtcEndpointExtraction
+
+            return AnyframeBatEtcEndpointExtraction(java_parser=java_parser, cache_manager=cache_manager)
             
         elif framework_type == "AnyframeOld":
             # TODO: 추후 구현
@@ -98,6 +108,22 @@ class EndpointExtractionStrategyFactory:
                 f"framework_type '{framework_type}'는 아직 구현되지 않았습니다."
             )
 
+        elif framework_type == "anyframe_banka":
+            from .anyframe_sarangon_endpoint_extraction import AnyframeSarangOnEndpointExtraction
+
+            return AnyframeSarangOnEndpointExtraction(
+                java_parser=java_parser, cache_manager=cache_manager
+            )
+
+        elif framework_type == "BatBanka":
+            from .anyframe_bnk_batch_endpoint_extraction import (
+                AnyframeBNKBatchEndpointExtraction,
+            )
+
+            return AnyframeBNKBatchEndpointExtraction(
+                java_parser=java_parser, cache_manager=cache_manager
+            )
+
         elif framework_type == "anyframe_ccs_batch":
             from .anyframe_ccs_batch_endpoint_extraction import (
                 AnyframeCCSBatchEndpointExtraction,
@@ -110,8 +136,10 @@ class EndpointExtractionStrategyFactory:
         else:
             raise ValueError(
                 f"지원하지 않는 framework_type: {framework_type}. "
-                f"가능한 값: SpringMVC, AnyframeSarangOn, AnyframeOld, AnyframeEtc, "
-                f"AnyframeCCS, SpringBatQrts, AnyframeBatSarangOn, AnyframeBatEtc, "
-                f"anyframe_ccs_batch"
+                f"가능한 값: SpringMVC, SpringDirect, SpringDigitalChannel, "
+                f"Anyframe, AnyframeSarangOn, AnyframeSarangonBatch, "
+                f"AnyframeOld, AnyframeEtc, AnyframeCCS, "
+                f"SpringBatQrts, AnyframeBatSarangOn, AnyframeBatEtc, "
+                f"anyframe_banka, BatBanka, anyframe_ccs_batch"
             )
 
