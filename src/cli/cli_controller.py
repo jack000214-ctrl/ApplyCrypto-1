@@ -36,6 +36,7 @@ from models.endpoint import Endpoint
 from models.modification_record import ModificationRecord
 from models.source_file import SourceFile
 from models.table_access_info import TableAccessInfo
+from generator.check_join import CheckJoinRunner
 from modifier.code_modifier import CodeModifier
 from persistence.cache_manager import CacheManager
 from persistence.data_persistence_manager import (
@@ -174,6 +175,24 @@ class CLIController:
             help="특정 대상 테이블만 처리합니다",
         )
 
+        # check-join 명령어 서브파서
+        check_join_parser = subparsers.add_parser(
+            "check-join",
+            help="access_tables 기준 JOIN 대상 테이블/컬럼을 분석합니다",
+            description="analyze 결과(table_access_info.json)와 access_tables를 이용해 JOIN 대상 테이블/컬럼을 LLM으로 분석합니다.",
+        )
+        check_join_parser.add_argument(
+            "--config",
+            type=str,
+            default="config.json",
+            help="설정 파일 경로 (기본값: config.json)",
+        )
+        check_join_parser.add_argument(
+            "--export",
+            action="store_true",
+            help="기존 check_join_results.json을 엑셀로 내보냅니다 (openpyxl 사용)",
+        )
+
 
         # clear 명령어 서브파서
         clear_parser = subparsers.add_parser(
@@ -298,6 +317,8 @@ class CLIController:
                 return self._handle_list(parsed_args)
             elif parsed_args.command == "modify":
                 return self._handle_modify(parsed_args)
+            elif parsed_args.command == "check-join":
+                return self._handle_check_join(parsed_args)
             elif parsed_args.command == "clear":
                 return self._handle_clear(parsed_args)
             else:
@@ -657,6 +678,34 @@ class CLIController:
 
         except Exception as e:
             self.logger.exception(f"list 명령어 실행 중 오류: {e}")
+            self.logger.error(f"오류: {e}")
+            return 1
+
+    def _handle_check_join(self, args: argparse.Namespace) -> int:
+        """
+        check_join 명령어 핸들러
+
+        - 기본: LLM으로 JOIN 분석 후 check_join_results.json 저장
+        - --export: 기존 결과를 엑셀로 내보내기
+        """
+        try:
+            config = self.load_config(args.config)
+            runner = CheckJoinRunner(config=config)
+
+            if getattr(args, "export", False):
+                out_path = runner.export_to_excel()
+                self.logger.info(f"엑셀 내보내기 완료: {out_path}")
+                return 0
+
+            results_path = runner.run()
+            self.logger.info(f"check_join 결과 저장 완료: {results_path}")
+            return 0
+
+        except ConfigurationError as e:
+            self.logger.error(f"오류: {e}")
+            return 1
+        except Exception as e:
+            self.logger.exception(f"check_join 명령어 실행 중 오류: {e}")
             self.logger.error(f"오류: {e}")
             return 1
 
