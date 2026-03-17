@@ -2,6 +2,11 @@
 
 이 문서는 `src/generator/analysis_report_generator.py`가 따라야 할 구현 명세서(Implementation Specification)입니다. 실제 코드 분석을 통해 정확한 기능, 데이터 흐름, 출력 구조를 명시합니다.
 
+**최신 개선사항** (v2.5+):
+- ✅ **Enum 타입 지원**: Enum 클래스도 AS-IS 분석 대상에 포함
+- ✅ **향상된 AST 파싱**: 경로 기반 순환 참조 방지로 복잡한 코드 구조도 정확히 분석
+- ✅ **안정적인 데이터 수집**: JavaASTParser 기반 메타정보 정확도 향상
+
 ---
 
 ## A. 목적 및 개요

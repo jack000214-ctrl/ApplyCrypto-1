@@ -6,6 +6,7 @@ Java 클래스별 Excel 사양서를 AST 파싱으로 생성하는 도구입니�
 import re
 import os
 import json
+import logging
 from typing import Optional, Set, Dict, Any, List
 import zipfile
 from pathlib import Path
@@ -18,6 +19,9 @@ from persistence.cache_manager import CacheManager
 
 # 공통 상수
 DEFAULT_FONT = Font(name='맑은 고딕', size=10)
+
+# Logger 초기화 (모듈 레벨)
+logger = logging.getLogger("applycrypto")
 
 # 정규식 패턴 상수
 TITLE_PATTERNS = [
@@ -152,9 +156,9 @@ def generate_spec(config: Configuration, zip_output=False, diff_mode=False, llm_
             from src.modifier.llm.llm_factory import create_llm_provider
             llm_provider = create_llm_provider(config.llm_provider)
             if llm_provider:
-                print(f"INFO - LLM 프로바이더 초기화 완료: {type(llm_provider).__name__}")
+                logger.info(f"Step 0 (LLM 초기화): LLM 프로바이더 초기화 완료 ({type(llm_provider).__name__})")
         except Exception as e:
-            print(f"경고: LLM 프로바이더 초기화 실패 - {e}. 메서드 요약 기능 비활성화")
+            logger.warning(f"Step 0 (LLM 초기화): LLM 프로바이더 초기화 실패 - {e}")
     # diff_mode 검증
     if diff_mode:
         if not config.artifact_generation or not config.artifact_generation.old_code_path:
@@ -168,7 +172,7 @@ def generate_spec(config: Configuration, zip_output=False, diff_mode=False, llm_
 
     # `target_project`가 제공되면 ChangedFileList_*.txt에서 읽음
     if target_project:
-        java_files, first_map = read_changedFileList_excel(target_project)
+        java_files, first_map = read_changedFileList(target_project)
 
     if not target_project:
         raise ValueError("target_project is required for output directory")
@@ -179,13 +183,13 @@ def generate_spec(config: Configuration, zip_output=False, diff_mode=False, llm_
         changed_files_all = _get_changed_java_files_flexible(target_project, old_code_path)
         # ChangedFileList의 파일 중에서 실제로 변경된 파일만 필터링
         java_files = [f for f in java_files if f in changed_files_all]
-        print(f'Filtered to {len(java_files)} changed file(s) in diff mode...')
+        logger.info(f"Step 1 (Diff 필터링): {len(java_files)}개 변경파일 필터링 완료")
 
     # 출력 디렉터리 설정
     out_dir = os.path.join(target_project, '.applycrypto', 'artifacts')
     os.makedirs(out_dir, exist_ok=True)
 
-    print(f'Processing {len(java_files)} Java file(s)...')
+    logger.info(f"Step 1 (사양서 생성): {len(java_files)}개 Java 파일 처리 시작")
 
     # JavaASTParser 초기화 (캐시 매니저 사용)
     cache_dir = Path(target_project) / '.applycrypto' / 'cache'
@@ -214,7 +218,7 @@ def generate_spec(config: Configuration, zip_output=False, diff_mode=False, llm_
         zip_path = out_path / zip_name
         try:
             with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
-                for jf in java_files:
+                for idx, jf in enumerate(java_files, 1):
                     try:
                         source = read_java_file(jf)
                     except Exception:
@@ -223,7 +227,7 @@ def generate_spec(config: Configuration, zip_output=False, diff_mode=False, llm_
                     # JavaASTParser를 사용한 정확한 메서드 추출
                     tree, error = java_parser.parse_file(jf)
                     if error or not tree:
-                        print(f'Warning: AST parsing failed for {jf}: {error}')
+                        logger.warning(f"AST 파싱 실패 (ZIP 생성): {jf}: {error}")
                         continue
                     
                     classes = java_parser.extract_class_info(tree, jf)
@@ -255,13 +259,13 @@ def generate_spec(config: Configuration, zip_output=False, diff_mode=False, llm_
                             methods = _filter_methods_by_names(methods, changed_method_names)
                             filtered_count = len(methods)
                             # 디버그: 필터링 결과 상세 출력
-                            # print(f'    [DIFF] {class_name}: extract_changed_methods={changed_methods_full}')
-                            # print(f'    [DIFF] {class_name}: changed_names={changed_method_names}')
-                            # print(f'    [DIFF] {class_name}: 메소드 필터링 {original_count}→{filtered_count}')
+                            logger.debug(f'    [DIFF] {class_name}: extract_changed_methods={changed_methods_full}')
+                            logger.debug(f'    [DIFF] {class_name}: changed_names={changed_method_names}')
+                            logger.debug(f'    [DIFF] {class_name}: 메소드 필터링 {original_count}→{filtered_count}')
                             if not methods:
                                 continue  # 변경된 메소드가 없으면 스킵
                         except Exception as e:
-                            print(f'    [ERROR] {class_name}: extract_changed_methods 실패 - {e}')
+                            logger.error(f"extract_changed_methods 실패 (ZIP): {class_name}: {e}")
                             import traceback
                             traceback.print_exc()
                             # 에러 시 원래 메소드 리스트 사용
@@ -281,7 +285,7 @@ def generate_spec(config: Configuration, zip_output=False, diff_mode=False, llm_
                         pass
 
                     if class_name:
-                        write_excel_for_class(
+                        generated_filename = write_excel_for_class(
                             class_name,
                             jf,
                             package,
@@ -295,6 +299,10 @@ def generate_spec(config: Configuration, zip_output=False, diff_mode=False, llm_
                             zip_writer=zf,
                             llm_provider=llm_provider,
                         )
+                        if generated_filename:
+                            logger.info(f"  {idx}/{len(java_files)} {Path(jf).name} → {generated_filename} 처리 완료")
+                        else:
+                            logger.warning(f"  {idx}/{len(java_files)} {Path(jf).name} 처리 실패")
         except Exception:
             pass
 
@@ -302,26 +310,43 @@ def generate_spec(config: Configuration, zip_output=False, diff_mode=False, llm_
 
     else:
         # 기본 동작: 개별 .xlsx 파일을 디스크에 저장
-        for jf in java_files:
+        
+        # 오늘 날짜 spec 파일들 초기화 (루프 전에 한 번만)
+        # 같은 날짜의 기존 파일들을 삭제하여 새로 시작
+        out_path = Path(out_dir)
+        out_path.mkdir(parents=True, exist_ok=True)
+        date_str = datetime.now().strftime('%Y%m%d')
+        if out_path.exists():
+            for existing_file in out_path.iterdir():
+                if existing_file.is_file() and existing_file.suffix == '.xlsx':
+                    # 같은 날짜 패턴의 모든 파일 확인: *_{date_str}.xlsx
+                    if existing_file.name.endswith(f'_{date_str}.xlsx'):
+                        try:
+                            existing_file.unlink()
+                            logger.debug(f"기존 오늘 날짜 spec 파일 제거: {existing_file.name}")
+                        except Exception as e:
+                            logger.warning(f"기존 파일 삭제 실패 {existing_file.name}: {e}")
+        
+        for idx, jf in enumerate(java_files, 1):
             try:
                 source = read_java_file(jf)
             except Exception as e:
-                print(f"Could not read {jf}: {e}")
+                logger.warning(f"Java 파일 읽기 실패: {jf}: {e}")
                 continue
 
             # JavaASTParser를 사용한 정확한 메서드 추출
             try:
                 tree, error = java_parser.parse_file(jf)
                 if error or not tree:
-                    print(f'Warning: AST parsing failed for {jf}: {error}')
+                    logger.warning(f"AST 파싱 실패: {jf}: {error}")
                     continue
                 
                 classes = java_parser.extract_class_info(tree, jf)
             except RecursionError as e:
-                print(f'Error: Maximum recursion depth in parsing {jf}. Skipping.')
+                logger.error(f"AST 파싱 중 재귀 깊이 초과: {jf}")
                 continue
             except Exception as e:
-                print(f'Error: Exception during AST extraction for {jf}: {str(e)[:100]}. Skipping.')
+                logger.error(f"AST 추출 중 예외 발생: {jf}: {str(e)[:100]}")
                 continue
             
             if not classes:
@@ -353,13 +378,13 @@ def generate_spec(config: Configuration, zip_output=False, diff_mode=False, llm_
                     methods = _filter_methods_by_names(methods, changed_method_names)
                     filtered_count = len(methods)
                     # 디버그: 필터링 결과 상세 출력
-                    # print(f'    [DIFF] {class_name}: extract_changed_methods={changed_methods_full}')
-                    # print(f'    [DIFF] {class_name}: changed_names={changed_method_names}')
-                    # print(f'    [DIFF] {class_name}: 메소드 필터링 {original_count}→{filtered_count}')
+                    # logger.debug(f'    [DIFF] {class_name}: extract_changed_methods={changed_methods_full}')
+                    # logger.debug(f'    [DIFF] {class_name}: changed_names={changed_method_names}')
+                    # logger.debug(f'    [DIFF] {class_name}: 메소드 필터링 {original_count}→{filtered_count}')
                     if not methods:
                         continue  # 변경된 메소드가 없으면 스킵
                 except Exception as e:
-                    print(f'    [ERROR] {class_name}: extract_changed_methods 실패 - {e}')
+                    logger.error(f"extract_changed_methods 실패: {class_name}: {e}")
                     import traceback
                     traceback.print_exc()
                     # 에러 시 원래 메소드 리스트 사용
@@ -381,7 +406,7 @@ def generate_spec(config: Configuration, zip_output=False, diff_mode=False, llm_
                 pass
 
             if class_name:
-                write_excel_for_class(
+                generated_filename = write_excel_for_class(
                     class_name, 
                     jf, 
                     package, 
@@ -392,8 +417,13 @@ def generate_spec(config: Configuration, zip_output=False, diff_mode=False, llm_
                     methods, 
                     out_dir, 
                     first_changed_map=first_map,
-                    llm_provider=llm_provider
+                    llm_provider=llm_provider,
                 )
+                if generated_filename:
+                    logger.info(f"  {idx}/{len(java_files)} {Path(jf).name} → {generated_filename} 처리 완료")
+                else:
+                    logger.warning(f"  {idx}/{len(java_files)} {Path(jf).name} 처리 실패")
+                # logger.info(f"  {idx}/{len(java_files)} {Path(jf).name} 처리 완료")
 
 
 # -----------------------------
@@ -1551,7 +1581,7 @@ def scan_dir_for_java(root_dir):
     return [str(pf) for pf in p.rglob('*.java')]
 
 
-def read_changedFileList_excel(target_project_path):
+def read_changedFileList(target_project_path):
     """타겟 프로젝트의 ChangedFileList에서 변경된 Java 파일 목록 반환.
 
     Args:
@@ -1566,7 +1596,7 @@ def read_changedFileList_excel(target_project_path):
     applycrypto_dir = target_path / '.applycrypto'
    
     if not applycrypto_dir.exists():
-        print(f'Warning: .applycrypto directory not found in {target_project_path}')
+        logger.warning(f".applycrypto 디렉터리를 찾을 수 없음: {target_project_path}")
         return [], {}
    
     # 우선 ChangedFileList_*.txt 파일을 찾습니다
@@ -1576,7 +1606,7 @@ def read_changedFileList_excel(target_project_path):
         # TXT 파일 사용
         txt_file = changedFileList_txt_files[0]
         if len(changedFileList_txt_files) > 1:
-            print(f'Warning: Multiple ChangedFileList Text files found. Using: {txt_file.name}')
+            logger.warning(f"여러 개의 ChangedFileList 파일 발견. 사용: {txt_file.name}")
 
         try:
             with open(txt_file, 'r', encoding='utf-8') as f:
@@ -1587,6 +1617,10 @@ def read_changedFileList_excel(target_project_path):
             for line in lines:
                 line = line.strip()
                 if line and not line.startswith('#'):  # 주석은 건너뜀
+                    # .java 파일로만 필터링 (XML 등 다른 파일 제외)
+                    if not line.lower().endswith('.java'):
+                        continue
+
                     # 잘못된 경로 보정: 선행 슬래시 제거
                     if line.startswith('/'):
                         line = line[1:]
@@ -1600,14 +1634,14 @@ def read_changedFileList_excel(target_project_path):
 
                     java_files.append(abs_path)
 
-            print(f'Found {len(java_files)} files in Text')
+            logger.info(f"Step 1 (ChangedFileList 로드): {len(java_files)}개 파일 발견")
             return java_files, first_map
 
         except Exception as e:
-            print(f'Error reading Text file {txt_file}: {e}')
+            logger.error(f"ChangedFileList Text 파일 읽기 실패 {txt_file}: {e}")
             return [], {}
    
-    print(f'Warning: No ChangedFileList_*.txt file found in {applycrypto_dir}')
+    logger.warning(f"ChangedFileList_*.txt 파일을 찾을 수 없음: {applycrypto_dir}")
     return [], {}
 
 
@@ -2205,7 +2239,7 @@ def fill_cover_sheet(ws, class_name, file_path, source, package, first_changed_p
     except Exception:
         pass
 
-    print(f'- 표제부 완료: {class_name} (유형: {program_type or "미정의"})')
+    logger.debug(f'표제부 완료: {class_name}')
 
 
 def extract_definition_from_summary(summary_text):
@@ -2289,7 +2323,7 @@ def fill_object_definition_sheet(ws, methods, file_path=None, config=None, sourc
                         # "정의:" 부분만 추출
                         description = extract_definition_from_summary(summary)
             except Exception as e:
-                print(f"    [Object정의 LLM 요약 실패] {method.get('name', '?')}: {str(e)[:60]}", flush=True)
+                logger.warning(f"LLM 요약 실패: {method.get('name', '?')}: {str(e)[:60]}")
         
         # 2) LLM 실패시 기존 comment에서 추출
         if not description and method.get('comment'):
@@ -2414,7 +2448,7 @@ def fill_object_definition_sheet(ws, methods, file_path=None, config=None, sourc
         ws.cell(row=row_num, column=4).border = thin_border
         ws.cell(row=row_num, column=4).font = font_style
    
-    print(f'  Object정의 완료: {len(methods)}개 메소드')
+    logger.debug(f'Object정의 시트 완료: {len(methods)}개 메소드')
 
 
 def fill_object_declaration_sheet(ws, package, imports, annotations, extends, implements, source=None):
@@ -2554,7 +2588,7 @@ def fill_object_declaration_sheet(ws, package, imports, annotations, extends, im
                 add_row_with_formatting(current_row, col_b_value=f'implements {impl}')
                 current_row += 1
    
-    print(f'  Object선언 완료: Package={package}, Imports={len(imports) if imports else 0}, Annotations={len(annotations) if annotations else 0}')
+    logger.debug(f'Object선언 시트 완료: Package, Imports={len(imports) if imports else 0}')
 
 
 def copy_worksheet(source_ws, target_wb, new_name):
@@ -2803,10 +2837,10 @@ def generate_method_summary(method_source: str, method_name: str, llm_provider) 
                 # print(f"    [메서드 요약 LLM] {method_name}: {summary[:80]}", flush=True)
                 return summary
         except json.JSONDecodeError as e:
-            print(f"    [메서드 요약 LLM 실패] {method_name}: JSON 파싱 오류 ({str(e)[:60]}) - 휴리스틱으로 폴백", flush=True)
+            logger.debug(f"메서드 {method_name}: JSON 파싱 오류 - 휴리스틱 사용")
             return ""
         except Exception as e:
-            print(f"    [메서드 요약 LLM 실패] {method_name}: {str(e)[:80]} - 휴리스틱으로 폴백", flush=True)
+            logger.debug(f"메서드 {method_name}: LLM 오류 - 휴리스틱 사용")
             return ""
     
     # LLM 미활성화 또는 실패한 경우 기본값 반환
@@ -2864,7 +2898,7 @@ def set_cell_value_safe(ws, cell_ref, value):
         # 값 설정
         ws[cell_ref].value = value
     except Exception as e:
-        print(f"    [셀 쓰기 실패] {cell_ref}: {str(e)[:60]}", flush=True)
+        logger.warning(f"셀 쓰기 실패: {cell_ref}")
 
 
 def create_method_sheet(wb, method, source, template_ws, llm_provider=None):
@@ -3086,7 +3120,6 @@ def extract_method_with_annotations(source, method_name):
     return result
 
 
-
 def extract_method_with_annotations_exact_match(source, method_name, param_list):
     """파라미터를 포함하여 정확한 메서드 추출 (어노테이션 포함).
     
@@ -3213,7 +3246,10 @@ def extract_method_with_annotations_exact_match(source, method_name, param_list)
 # -------------------------
 
 def write_excel_for_class(class_name, file_path, package, imports, extends, implements, annotations, methods, out_dir, first_changed_map: dict = None, zip_writer: zipfile.ZipFile = None, llm_provider=None):
-    """템플릿 사용 또는 새로 생성하여 Excel 사양서 기록."""
+    """템플릿 사용 또는 새로 생성하여 Excel 사양서 기록.
+    
+    파일명 충돌은 함수 내에서 자동으로 처리됨 (class명 기반).
+    """
     # DEBUG: 메소드 개수 추적
     initial_method_count = len(methods) if methods else 0
     
@@ -3243,8 +3279,21 @@ def write_excel_for_class(class_name, file_path, package, imports, extends, impl
         else:
             project_name = fp.parent.name
 
-    # Prepare artifact file path (per-class original behavior)
-    out_file = out_dir_path / f"{safe_name}_{date_str}.xlsx"
+    # 파일명 생성 (클래스명 기반, 같은 클래스명의 중복 파일 처리)
+    base_filename = f"{safe_name}_{date_str}"
+    output_filename = f"{base_filename}.xlsx"
+    out_file = out_dir_path / output_filename
+    
+    # 같은 이름의 파일이 이미 생성되었으면 counter 추가 (중복 방지)
+    if out_file.exists():
+        counter = 1
+        while True:
+            output_filename = f"{safe_name}_{counter}_{date_str}.xlsx"
+            out_file = out_dir_path / output_filename
+            if not out_file.exists():
+                logger.debug(f"파일명 충돌 처리: {safe_name}_{date_str}.xlsx → {output_filename}")
+                break
+            counter += 1
    
     try:
         # Read original Java source for JavaDoc extraction
@@ -3274,7 +3323,7 @@ def write_excel_for_class(class_name, file_path, package, imports, extends, impl
             fill_object_definition_sheet(ws_obj_def, methods, file_path=file_path, config=Configuration, source=source, llm_provider=llm_provider)
             after_fill = len(methods) if methods else 0
             if before_fill != after_fill:
-                print(f'    [DEBUG] {class_name}: fill_object_definition_sheet 후 메소드 개수 변화 {before_fill}→{after_fill}')
+                logger.debug(f'{class_name}: Object정의 시트 처리 완료')
        
         # Fill Object선언 sheet
         if 'Object선언' in wb.sheetnames:
@@ -3293,11 +3342,11 @@ def write_excel_for_class(class_name, file_path, package, imports, extends, impl
             # DEBUG: 메소드 시트 생성 직전 메소드 개수 확인
             final_method_count = len(methods) if methods else 0
             if initial_method_count != final_method_count:
-                print(f'    [DEBUG] {class_name}: 메소드 개수 변화 {initial_method_count}→{final_method_count}')
+                logger.debug(f'{class_name}: 메소드 링크 싱 완료')
            
             for method in methods:
                 create_method_sheet(wb, method, source, template_method_ws, llm_provider)
-            print(f'  메소드 시트 생성 완료: {len(methods)}개')
+            logger.debug(f'메소드 링크 싱 완료: {len(methods)}개')
             # Ensure '기타정의사항' is created after all method sheets so it appears last
             try:
                 # Remove existing sheet if present to avoid duplicates
@@ -3318,7 +3367,7 @@ def write_excel_for_class(class_name, file_path, package, imports, extends, impl
             except Exception:
                 pass
         else:
-            print(f'Warning: Cannot create method sheets - template sheet (login) not found')
+            logger.warning(f'구성 들 탐지 : template 시트(login) 를 찾을 수 없습니다')
        
             # Populate '기타정의사항' sheet based on source analysis
             if '기타정의사항' in wb.sheetnames:
@@ -3341,31 +3390,36 @@ def write_excel_for_class(class_name, file_path, package, imports, extends, impl
                 buf = BytesIO()
                 wb.save(buf)
                 buf.seek(0)
-                arcname = f"{safe_name}_{date_str}.xlsx"
+                arcname = output_filename  # 충돌 처리된 파일명 사용
                 try:
                     zip_writer.writestr(arcname, buf.getvalue())
+                    return output_filename  # ZIP 쓰기 성공 시 파일명 반환
                 except Exception as e:
                     # ZIP 쓰기 실패는 로그로 남기되 계속 진행
-                    print(f'- ZIP 쓰기 실패: {e}', flush=True)
+                    logger.error(f'ZIP 쓰기 실패: {e}')
+                    return None
                 # 출력 파일 정보는 항상 출력 (zip_writer.filename은 str로 변환)
                 try:
                     zfn = getattr(zip_writer, 'filename', None)
-                    print(f'- 출력 파일: {str(zfn)}', flush=True)
+                    logger.debug(f'출력 파일: ZIP 아카이브')
                 except Exception:
-                    print(f'- 출력 파일: (unknown)', flush=True)
+                    logger.debug(f'출력 파일: 미지정')
             except Exception as e:
-                print(f'- ZIP 처리 실패: {e}', flush=True)
+                logger.error(f'ZIP 처리 실패: {e}')
         else:
             try:
                 wb.save(out_file)
-                print(f'- 출력 파일: {out_file}', flush=True)
+                logger.debug(f'출력 파일: {out_file}')
+                return output_filename  # 생성된 파일명 반환
             except Exception as e:
-                print(f'저장 실패 {out_file}: {e}', flush=True)
+                logger.error(f'저장 실패: {e}')
+                return None
        
     except Exception as e:
-        print(f'저장 실패 {out_file}: {e}', flush=True)
+        logger.error(f'엑셀 저장 실패: {e}')
         import traceback
         traceback.print_exc()
+        return None
 
 
 def populate_other_definitions_sheet(wb, source: str, class_name: str, file_path: str):

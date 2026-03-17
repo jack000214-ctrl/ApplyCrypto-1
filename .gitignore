@@ -85,3 +85,6 @@ prompt_results
 src/modifier/code_generator/**/*template*.md
 
 *_specific_map.json
+
+deploy/
+config*.json

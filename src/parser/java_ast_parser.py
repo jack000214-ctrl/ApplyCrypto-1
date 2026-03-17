@@ -22,7 +22,6 @@ from .java_utils import JavaUtils
 # Java 언어 설정
 JAVA_LANGUAGE = Language(tsjava.language())
 
-
 @dataclass
 class ClassInfo:
     """
@@ -43,6 +42,7 @@ class ClassInfo:
     package: str = ""
     superclass: Optional[str] = None
     is_interface_class: bool = False
+    is_enum: bool = False
     interfaces: List[str] = field(default_factory=list)
     annotations: List[str] = field(default_factory=list)
     fields: List[Dict[str, Any]] = field(default_factory=list)
@@ -118,7 +118,7 @@ class JavaASTParser:
         import logging
 
         self.parser = Parser(JAVA_LANGUAGE)
-        self.logger = logging.getLogger("applycrypto.java_parser")
+        self.logger = logging.getLogger(__name__)
         # cache_manager가 없으면 임시 디렉터리에 생성
         if cache_manager is None:
             from tempfile import mkdtemp
@@ -137,7 +137,7 @@ class JavaASTParser:
         Args:
             file_path: Java 파일 경로 (Path 객체 또는 문자열)
             remove_comments: True이면 파싱 전 주석 제거 (기본값).
-                False이면 원본 그대로 파싱하여 라인 번호가 원본 파일과 일치합니다.
+                False이면 원본 그대로 파싱하여 라인 번호가 원본 파일과 일치
 
         Returns:
             Tuple[Optional[Tree], Optional[str]]: (AST 트리, 에러 메시지)
@@ -150,11 +150,9 @@ class JavaASTParser:
             else:
                 file_path = Path(file_path)
 
-            # 캐시 확인 (remove_comments=True일 때만 — False일 때는 캐시 키 충돌 방지)
-            if remove_comments:
-                cached_ast = self.cache_manager.get_cached_result(file_path)
-                if cached_ast:
-                    return cached_ast, None
+            # cached_ast = self.cache_manager.get_cached_result(file_path)
+            # if cached_ast:
+            #     return cached_ast, None
 
             # 파일 읽기 (여러 인코딩 시도)
             source_code = None
@@ -178,16 +176,12 @@ class JavaASTParser:
                     f"파일을 읽을 수 없습니다: 지원되는 인코딩을 찾을 수 없습니다 (시도한 인코딩: {', '.join(encodings)})",
                 )
 
-            # 주석 제거 (플래그에 따라)
+            # 주석 제거
             if remove_comments:
                 source_code = JavaUtils.remove_java_comments(source_code)
 
             # 파싱
             tree = self.parser.parse(bytes(source_code, "utf8"))
-
-            # 캐시 저장 (remove_comments=True일 때만)
-            if remove_comments:
-                self.cache_manager.set_cached_result(file_path, tree)
 
             return tree, None
 
@@ -196,46 +190,43 @@ class JavaASTParser:
         except Exception as e:
             return None, f"파싱 중 오류 발생: {str(e)}"
 
-    def get_classes(
-        self, file_path: Path
-    ) -> Tuple[List[ClassInfo], Optional[str]]:
+    def get_classes(self, file_path: Path) -> Tuple[List[ClassInfo], Optional[str]]:
         """
-        Java 파일 경로를 입력받아서 클래스 정보를 반환
+        Java 파일에서 클래스 정보를 추출 (캐싱 지원)
 
         Args:
             file_path: Java 파일 경로 (Path 객체 또는 문자열)
 
         Returns:
             Tuple[List[ClassInfo], Optional[str]]: (클래스 정보 목록, 에러 메시지)
-                에러가 없으면 에러 메시지는 None
         """
-        # Path 객체로 변환 (SourceFile 객체가 전달될 수 있으므로 path 속성 확인)
+        # Path 객체로 변환
         if hasattr(file_path, "path"):
-            # SourceFile 객체인 경우 path 속성 사용
             file_path = Path(file_path.path)
         else:
             file_path = Path(file_path)
 
-        # 캐시 확인
-        cached_ast = self.cache_manager.get_cached_result(file_path)
-        
-        if cached_ast:
-            # 캐시가 있으면 캐시에서 Tree를 가져와서 사용
-            tree = cached_ast
-        else:
-            # 캐시가 없으면 parse_file 호출
-            tree, error = self.parse_file(file_path, remove_comments=True)
-            if error:
-                return [], error
-            if tree is None:
-                return [], "파싱 결과가 None입니다"
+        # # 1. 캐시된 클래스 정보 확인 (접미사 제거 -> 기본 캐시 키 사용)
+        # cached_classes = self.cache_manager.get_cached_result(file_path, namespace="ast_parser")
+        # if cached_classes is not None:
+        #     return cached_classes, None
 
-        # extract_class_info를 사용하여 클래스 정보 추출
-        try:
-            classes = self.extract_class_info(tree, file_path)
-            return classes, None
-        except Exception as e:
-            return [], f"클래스 정보 추출 중 오류 발생: {str(e)}"
+        # 2. 캐시 없으면 파싱 수행
+        tree, error = self.parse_file(file_path)
+        if error:
+            return [], error
+
+        if not tree:
+            return [], "파싱된 트리가 없습니다."
+        
+        # 3. 클래스 정보 추출
+        classes = self.extract_class_info(tree, file_path)
+
+        # 4. 결과 캐싱 (접미사 제거 -> 기본 캐시 키 사용)
+        # ClassInfo 객체들은 pickle 가능하므로 디스크에 저장됨
+        self.cache_manager.set_cached_result(file_path, classes, namespace="ast_parser")
+
+        return classes, None
 
     def extract_class_info(self, tree: Tree, file_path: Path) -> List[ClassInfo]:
         """
@@ -264,7 +255,7 @@ class JavaASTParser:
         # Import 문 추출
         imports = self._extract_imports(root_node)
 
-        # 클래스 및 인터페이스 선언 탐색
+        # 클래스, 인터페이스, 열거형 선언 탐색
         for node in self._traverse_tree(root_node):
             if node.type == "class_declaration":
                 class_info = self._parse_class_declaration(
@@ -280,6 +271,15 @@ class JavaASTParser:
                 )
                 if class_info:
                     class_info.is_interface_class = True
+                    class_info.imports = imports
+                    classes.append(class_info)
+            elif node.type == "enum_declaration":
+                # 열거형도 클래스와 동일하게 처리
+                class_info = self._parse_class_declaration(
+                    node, package_name, file_path
+                )
+                if class_info:
+                    class_info.is_enum = True
                     class_info.imports = imports
                     classes.append(class_info)
 
@@ -313,15 +313,15 @@ class JavaASTParser:
             List[str]: Import 문 목록
         """
         imports = []
-        
+
         # package 다음에 오는 import 문만 추출
         found_package = False
-        
+
         for child in root_node.children:
             if child.type == "package_declaration":
                 found_package = True
                 continue
-            
+
             # package를 찾은 후에만 import 추출
             if found_package and child.type == "import_declaration":
                 # import_declaration에서 scoped_identifier 추출
@@ -347,9 +347,9 @@ class JavaASTParser:
                     elif subchild.type == "identifier" and subchild.text.decode("utf8") == "static":
                         # static import 처리
                         continue
-        
-        return imports
 
+        return imports
+    
     def _parse_class_declaration(
         self, node: Node, package_name: str, file_path: Path
     ) -> Optional[ClassInfo]:
@@ -412,33 +412,79 @@ class JavaASTParser:
                                 interface_name = interface_node.text.decode("utf8")
                                 if interface_name:
                                     class_info.interfaces.append(interface_name)
-        # 클래스/인터페이스 바디 분석
+        # 클래스/인터페이스/열거형 바디 분석
         for child in node.children:
-            if child.type in ["class_body", "interface_body"]:
-                for member in child.children:
-                    # 필드 추출
-                    if member.type == "field_declaration":
-                        field_info = self._extract_field_info(member)
-                        if field_info:
-                            class_info.fields.append(
-                                {
-                                    "name": field_info.name,
-                                    "type": field_info.type,
-                                    "annotations": field_info.annotations,
-                                    "initial_value": field_info.initial_value,
-                                    "access_modifier": field_info.access_modifier,
-                                    "is_static": field_info.is_static,
-                                    "is_final": field_info.is_final,
-                                }
-                            )
+            if child.type in ["class_body", "interface_body", "enum_body"]:
+                # enum_body의 경우 enum_body_declarations를 찾아야 함
+                if child.type == "enum_body":
+                    for enum_child in child.children:
+                        if enum_child.type == "enum_body_declarations":
+                            for member in enum_child.children:
+                                # 필드 추출
+                                if member.type == "field_declaration":
+                                    field_info = self._extract_field_info(member)
+                                    if field_info:
+                                        class_info.fields.append(
+                                            {
+                                                "name": field_info.name,
+                                                "type": field_info.type,
+                                                "annotations": field_info.annotations,
+                                                "initial_value": field_info.initial_value,
+                                                "access_modifier": field_info.access_modifier,
+                                                "is_static": field_info.is_static,
+                                                "is_final": field_info.is_final,
+                                            }
+                                        )
 
-                    # 메서드 추출
-                    elif member.type == "method_declaration":
-                        method_info = self._extract_method_info(
-                            member, class_info.name, file_path
-                        )
-                        if method_info:
-                            class_info.methods.append(method_info)
+                                # 메서드 추출
+                                elif member.type == "method_declaration":
+                                    method_info = self._extract_method_info(
+                                        member, class_info.name, file_path
+                                    )
+                                    if method_info:
+                                        class_info.methods.append(method_info)
+                                
+                                # 생성자 추출
+                                elif member.type == "constructor_declaration":
+                                    method_info = self._extract_method_info(
+                                        member, class_info.name, file_path
+                                    )
+                                    if method_info:
+                                        class_info.methods.append(method_info)
+                else:
+                    # class_body, interface_body의 경우 직접 자식 순회
+                    for member in child.children:
+                        # 필드 추출
+                        if member.type == "field_declaration":
+                            field_info = self._extract_field_info(member)
+                            if field_info:
+                                class_info.fields.append(
+                                    {
+                                        "name": field_info.name,
+                                        "type": field_info.type,
+                                        "annotations": field_info.annotations,
+                                        "initial_value": field_info.initial_value,
+                                        "access_modifier": field_info.access_modifier,
+                                        "is_static": field_info.is_static,
+                                        "is_final": field_info.is_final,
+                                    }
+                                )
+
+                        # 메서드 추출
+                        elif member.type == "method_declaration":
+                            method_info = self._extract_method_info(
+                                member, class_info.name, file_path
+                            )
+                            if method_info:
+                                class_info.methods.append(method_info)
+                        
+                        # 생성자 추출
+                        elif member.type == "constructor_declaration":
+                            method_info = self._extract_method_info(
+                                member, class_info.name, file_path
+                            )
+                            if method_info:
+                                class_info.methods.append(method_info)
 
         return class_info if class_info.name else None
 
@@ -553,6 +599,7 @@ class JavaASTParser:
             file_path=str(file_path),
             line_number=node.start_point[0] + 1,
             end_line_number=node.end_point[0] + 1,
+            body=node.text.decode("utf8") # Added body content
         )
 
         # 메서드 어노테이션 및 접근 제어자

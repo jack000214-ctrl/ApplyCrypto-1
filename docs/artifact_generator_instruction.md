@@ -1,7 +1,12 @@
 # 🗂️ 변경내역(Artifact) 생성 구현 명세서
 
 이 문서는 `src/generator/artifact_generator.py`가 따라야 할 **구현 명세서(Implementation Specification)** 입니다.  
-작성일: 2026-02-03 | 최종 검토: 코드 기반 분석
+작성일: 2026-02-03 | 최종 검토: 2026-03-16 (v2.5 Enum 지원 추가)
+
+**최신 개선사항** (v2.5+):
+- ✅ **Enum 타입 지원**: Enum 클래스도 일반 클래스와 동일하게 처리 (AST Parser의 enum_declaration 인식)
+- ✅ **경로 기반 순환 참조 방지**: 복잡한 Java 구조 안정적 분석
+- ✅ **파일명 중복 감지**: Filesystem 기반 직접 확인 방식
 
 ---
 

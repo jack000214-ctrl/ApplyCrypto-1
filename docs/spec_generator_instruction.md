@@ -6,11 +6,22 @@
 
 **핵심 기능**: Java 소스 파일을 JavaASTParser(tree-sitter 기반)로 파싱하여 정확한 클래스 메타정보, 메서드를 추출하고 Excel 사양서를 생성합니다. 각 클래스별로 개별 `.xlsx` 파일을 생성하거나, `--zip` 옵션으로 모두 하나의 ZIP 파일로 압축합니다.
 
-**주요 개선사항** (v2.4+):
+**주요 개선사항** (v2.5+):
 - ✅ **정규식 → AST 파싱**: JavaASTParser(tree-sitter) 기반으로 메서드 추출의 정확도 향상, 중복 제거
 - ✅ **메타정보 확장**: 메서드 파라미터, 반환타입, 어노테이션, 예외 선언, 수정자(static/final/abstract) 자동 추출
 - ✅ **캐싱 지원**: 파싱 결과를 `.applycrypto/cache/` 디렉터리에 캐시하여 성능 향상
 - ✅ **모든 접근제한자 포함**: public, protected, private 메서드 모두 처리
+- ✅ **Enum 타입 완벽 지원 (v2.5 신규)**:
+  - enum_declaration 인식 및 구분 (ClassInfo.is_enum 플래그)
+  - enum 필드/메서드/생성자 자동 추출
+  - Enum 객체와 일반 클래스 동시 처리
+- ✅ **파일명 중복 감지 및 자동 처리 (v2.6 개선)**:
+  - **실시간 파일 존재 확인**: `out_file.exists()` 메서드로 실제 파일시스템 체크
+  - **자동 인덱스 부여**: 중복 발견 시 `{ClassName}_1_{date}.xlsx`, `{ClassName}_2_{date}.xlsx` 형식으로 자동 넘버링
+  - **충돌 회피 알고리즘**: counter를 1부터 증가시키며 사용 가능한 파일명 탐색
+  - **로깅 지원**: 파일명 충돌 발생 시 디버그 로그 기록 (`파일명 충돌 처리: {원본} → {변경됨}`)
+  - **여러 경로의 동일 클래스명 안전 처리**: 서로 다른 경로의 같은 클래스명 파일도 모두 생성 가능
+- ✅ **향상된 트리 순환 참조 방지**: 경로 기반 추적으로 중복 노드의 다중 경로 방문 지원
 - ✅ **Input Parameter 행 추가** (Row 6/11): 파라미터 시그니처 자동 표시
 - ✅ **Return Type Generic 보존**: `List<Employee>`, `Map<String, Object>` 등 '<>' 문자 유지
 - ✅ **Object 정의 명시화** (Row 2-3): Object ID (메서드명) + Description (JavaDoc 주석) 분리
@@ -24,8 +35,13 @@
 - ✅ **LLM 응답 파싱 강화**: 마크다운 코드블럭 제거, JSON 파싱 오류 처리, 실패 시 "기능 없음" 반환
 - ✅ **줄바꿈 지원**: \n 문자가 실제 줄바꿈으로 표시 (wrap_text 활성화)
 
-**산출물**: 
-- 개별 모드: `{target_project}/.applycrypto/artifacts/{ClassName}_spec.xlsx` (클래스당 1개 파일)
+**산출물**:
+- 개별 모드: `{target_project}/.applycrypto/artifacts/{ClassName}_{YYYYMMDD}.xlsx` (클래스당 1개 파일)
+  - **파일명 중복 시 자동 넘버링**:
+    - 기본 형식: `{ClassName}_{YYYYMMDD}.xlsx`
+    - 중복 발견 시: `{ClassName}_1_{YYYYMMDD}.xlsx`, `{ClassName}_2_{YYYYMMDD}.xlsx`, ...
+    - 충돌 감지: `Path.exists()` 메서드로 실시간 파일시스템 확인
+    - 인덱스 증가: counter를 1부터 순차 증가하며 사용 가능한 파일명 탐색
 - ZIP 모드: `{target_project}/.applycrypto/artifacts/{ProjectName}_specs_{YYYYMMDD}.zip` (통합 ZIP)
 
 ## B. 입력 및 전제조건
@@ -56,9 +72,13 @@
 - **출력**: ClassInfo 객체 (메터정보 풍부)
   - `name`: 클래스명
   - `package`: 패키지명
-  - `methods`: Method 객체 리스트
+  - `is_enum`: Enum 여부 (bool) ⭐ v2.5 신규
+  - `is_interface_class`: 인터페이스 여부 (bool)
+  - `methods`: Method 객체 리스트 (또는 enum 멤버 메서드)
+  - `fields`: 필드 정보 (또는 enum 상수)
   - `annotations`: 클래스 어노테이션
   - `superclass` / `interfaces`: 상속/구현 정보
+  - `access_modifier`: 접근제한자 (public/protected/private/package)
 
 **Method 객체 구조** (AST 기반 추출):
 ```python
@@ -601,15 +621,34 @@ python main.py generate-spec --config config.json --diff --llm --zip
 **상황**: 정규식이 클래스 또는 메서드를 찾지 못함  
 **처리**: 해당 구성 요소는 빈 값으로 처리하고 계속 진행
 
-### H-3. 시트 제목 충돌
+### H-3. 파일명 충돌 (v2.6 신규)
 
-**상황**: 메서드명이 중복되거나 31자 초과  
+**상황**: 동일한 클래스명의 파일이 여러 경로에 존재하여 출력 파일명이 중복됨
+**처리**: `write_excel_for_class()` 함수 내 자동 충돌 회피 로직
+- **충돌 감지**: `out_file.exists()` 메서드로 실시간 파일시스템 확인
+- **자동 넘버링**: counter를 1부터 증가시키며 사용 가능한 파일명 탐색
+  ```python
+  # 기본 파일명: UserService_20260317.xlsx
+  # 충돌 시: UserService_1_20260317.xlsx
+  # 재충돌 시: UserService_2_20260317.xlsx
+  ```
+- **로깅**: 충돌 발생 시 디버그 로그 기록
+  ```
+  파일명 충돌 처리: UserService_20260317.xlsx → UserService_1_20260317.xlsx
+  ```
+- **무한 루프 방지**: while True 루프이지만 실제로는 파일시스템 제약으로 자연스럽게 종료
+
+**코드 위치**: `src/generator/spec_generator.py:3287-3296`
+
+### H-4. 시트 제목 충돌
+
+**상황**: 메서드명이 중복되거나 31자 초과
 **처리**: `_sanitize_sheet_title()` 함수로 정리
 - 금지 문자 제거 (\ / ? * [ ])
 - 31자 초과 시 절단
 - 중복시 `_1`, `_2` 등 suffix 추가
 
-### H-4. ZIP 생성 실패
+### H-5. ZIP 생성 실패
 
 **상황**: 권한 부족 또는 디스크 공간 부족  
 **처리**: Exception 캐치, 오류 메시지 출력 후 계속

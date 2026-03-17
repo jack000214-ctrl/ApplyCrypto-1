@@ -266,16 +266,16 @@ If loop_depth = 0:
 Base Weight = dep0_crypto_count
 
 If loop_depth = 1 and data_type = paged_list:
-Base Weight = dep0_crypto_count + 20 × dep1_crypto_count
+Base Weight = dep0_crypto_count + {{ weights.paged_list }} × dep1_crypto_count
 
 If loop_depth = 1 and data_type = unpaged_list:
-Base Weight = dep0_crypto_count + 100 × dep1_crypto_count
+Base Weight = dep0_crypto_count + {{ weights.unpaged_list }} × dep1_crypto_count
 
 If loop_depth = 2 and data_type = paged_list:
-Base Weight = dep0_crypto_count + 10 × dep1_crypto_count + 20 × dep2_crypto_count
+Base Weight = dep0_crypto_count + {{ weights.nested_loop }} × dep1_crypto_count + {{ weights.paged_list }} × dep2_crypto_count
 
 If loop_depth = 2 and data_type = unpaged_list:
-Base Weight = dep0_crypto_count + 10 × dep1_crypto_count + 100 × dep2_crypto_count
+Base Weight = dep0_crypto_count + {{ weights.nested_loop }} × dep1_crypto_count + {{ weights.unpaged_list }} × dep2_crypto_count
 ```
 
 NOTE: `loop_depth` is the **maximum** depth where any crypto call physically exists.
@@ -384,7 +384,7 @@ Output:
   "dep0_crypto_count": 0,
   "dep1_crypto_count": 2,
   "dep2_crypto_count": 0,
-  "Base Weight": 200
+  "Base Weight": "{{ (2 * weights.unpaged_list) | int }}"
 }
 ```
 
@@ -416,7 +416,7 @@ Output:
   "dep0_crypto_count": 0,
   "dep1_crypto_count": 1,
   "dep2_crypto_count": 0,
-  "Base Weight": 100
+  "Base Weight": "{{ (1 * weights.unpaged_list) | int }}"
 }
 ```
 
@@ -454,11 +454,11 @@ Output:
   "dep0_crypto_count": 0,
   "dep1_crypto_count": 0,
   "dep2_crypto_count": 2,
-  "Base Weight": 2000
+  "Base Weight": "{{ weights.nested_loop * 0 + weights.unpaged_list * 2 | int }}"
 }
 ```
 
-Why: Both encrypt calls are at depth=2 → `dep2_crypto_count=2`. Formula: `10×0 + 100×2 = 2000`.
+Why: Both encrypt calls are at depth=2 → `dep2_crypto_count=2`. Formula: `{{ weights.nested_loop }}×0 + {{ weights.unpaged_list }}×2 = {{ (weights.nested_loop * 0 + weights.unpaged_list * 2) | int }}`.
 
 ### Few-Shot 5. Nested structure exists, crypto only in outer loop
 
@@ -488,7 +488,7 @@ Output:
   "dep0_crypto_count": 0,
   "dep1_crypto_count": 1,
   "dep2_crypto_count": 0,
-  "Base Weight": 100
+  "Base Weight": "{{ 1 * weights.unpaged_list | int }}"
 }
 ```
 
@@ -569,7 +569,7 @@ Output:
   "dep0_crypto_count": 0,
   "dep1_crypto_count": 1,
   "dep2_crypto_count": 1,
-  "Base Weight": 110
+  "Base Weight": "{{ weights.nested_loop * 1 + weights.unpaged_list * 1 | int }}"
 }
 ```
 
@@ -578,7 +578,7 @@ Why:
 1. `encrypt` is at depth=1 → `dep1_crypto_count=1`.
 2. `decrypt` is at depth=2 → `dep2_crypto_count=1`.
 3. `loop_depth=2` (max depth where crypto appears).
-4. `Base Weight = 0 + 10×1 + 100×1 = 110` (unpaged_list, depth=2 formula).
+4. `Base Weight = 0 + {{ weights.nested_loop }}×1 + {{ weights.unpaged_list }}×1 = {{ (weights.nested_loop * 1 + weights.unpaged_list * 1) | int }}` (unpaged_list, depth=2 formula).
 
 ### Few-Shot 8. policyId filtering — skip non-configured policy IDs
 
@@ -608,7 +608,7 @@ Output:
   "dep0_crypto_count": 0,
   "dep1_crypto_count": 2,
   "dep2_crypto_count": 0,
-  "Base Weight": 200
+  "Base Weight": "{{ 2 * weights.unpaged_list | int }}"
 }
 ```
 
@@ -617,7 +617,7 @@ Why:
 1. `encrypt("P017", ...)` → policyId `"P017"` is in the configured list → COUNT at dep1.
 2. `encrypt("P010", ...)` → policyId `"P010"` is NOT in the configured list → SKIP.
 3. `decrypt(0, SliEncryptionConstants.Policy.NAME, ...)` → constant is in configured list → COUNT at dep1.
-4. `dep1_crypto_count = 2`. `Base Weight = 100 × 2 = 200`.
+4. `dep1_crypto_count = 2`. `Base Weight = {{ weights.unpaged_list }} × 2 = {{ (2 * weights.unpaged_list) | int }}`.
 
 ---
 
@@ -641,7 +641,7 @@ decrypt();
 for(x) { noCrypto }
 ```
 
-Wrong: `{"loop_depth": 1, "dep1_crypto_count": 1, "Base Weight": 100}`
+Wrong: `{"loop_depth": 1, "dep1_crypto_count": 1, "Base Weight": "{{ weights.unpaged_list }}"}`
 
 Correct: `{"loop_depth": 0, "dep0_crypto_count": 1, "Base Weight": 1}`
 
@@ -654,9 +654,9 @@ for(A) { decrypt }
 for(B) { noCrypto }
 ```
 
-Wrong: `{"loop_depth": 2, "dep2_crypto_count": 1, "Base Weight": 1000}`
+Wrong: `{"loop_depth": 2, "dep2_crypto_count": 1, "Base Weight": "{{ weights.nested_loop * 0 + weights.unpaged_list * 2 }}"}`
 
-Correct: `{"loop_depth": 1, "dep1_crypto_count": 1, "Base Weight": 100}`
+Correct: `{"loop_depth": 1, "dep1_crypto_count": 1, "Base Weight": "{{ weights.unpaged_list }}"}`
 
 ### Failure Pattern C
 
@@ -669,9 +669,9 @@ for(A) {
 }
 ```
 
-Wrong: `{"loop_depth": 2, "dep2_crypto_count": 1, "Base Weight": 1000}`
+Wrong: `{"loop_depth": 2, "dep2_crypto_count": 1, "Base Weight": "{{ weights.nested_loop * 0 + weights.unpaged_list * 2 }}"}`
 
-Correct: `{"loop_depth": 1, "dep1_crypto_count": 1, "Base Weight": 100}`
+Correct: `{"loop_depth": 1, "dep1_crypto_count": 1, "Base Weight": "{{ weights.unpaged_list }}"}`
 
 Why: The inner loop has no crypto → ignored. `decrypt` is only at depth=1.
 
@@ -686,9 +686,9 @@ for(A) {
 }
 ```
 
-Wrong: `{"dep2_crypto_count": 2, "Base Weight": 2000}`
+Wrong: `{"dep2_crypto_count": 2, "Base Weight": "{{ weights.nested_loop * 0 + weights.unpaged_list * 2 }}"}`
 
-Correct: `{"dep1_crypto_count": 1, "dep2_crypto_count": 1, "Base Weight": 110}`
+Correct: `{"dep1_crypto_count": 1, "dep2_crypto_count": 1, "Base Weight": "{{ weights.nested_loop * 1 + weights.unpaged_list * 1 }}"}`
 
 Why: `encrypt` is at depth=1, `decrypt` is at depth=2. Count each by its actual position.
 

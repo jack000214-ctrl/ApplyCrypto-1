@@ -58,6 +58,13 @@ class WatsonXAIOnPremiseProvider(LLMProvider):
             "WATSONX_ON_PREMISE_MODEL_ID", "ibm/granite-3-3-8b-instruct"
         )
         self.project_id = project_id or os.getenv("WATSONX_ON_PREMISE_PROJECT_ID")
+        
+        try:
+            self.iam_token = self._get_credentials()
+            logger.info("WatsonX.AI OnPremise 토큰 획득 성공")
+        except Exception as e:
+            logger.error(f"WatsonX.AI OnPremise 토큰 획득 실패: {e}")
+            raise
 
     def _get_credentials(self) -> Dict[str, Any]:
         """
@@ -106,12 +113,12 @@ class WatsonXAIOnPremiseProvider(LLMProvider):
                 - model: 사용된 모델명
         """
         try:
-            iam_token = self._get_credentials()
+            # iam_token = self._get_credentials()
             url = f"{self.api_url}/m1/v1/text/chat?version=2023-05-29"
             headers = {
                 "Content-Type": "application/json",
                 "Accept": "application/json",
-                "Authorization": f"Bearer {iam_token}",
+                "Authorization": f"Bearer {self.iam_token}",
             }
             body = {
                 "messages": [{"role": "user", "content": [{"type":"text","text":prompt}]}],

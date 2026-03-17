@@ -8,6 +8,7 @@ import os
 import re
 import json
 import glob
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -19,6 +20,11 @@ from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.cell.text import InlineFont
 import difflib
 from config.config_manager import Configuration
+
+# =====================================
+# Logger 초기화
+# =====================================
+logger = logging.getLogger("applycrypto")
 
 # =====================================
 # 상수 정의
@@ -107,6 +113,9 @@ def generate_artifact(config: Configuration, use_llm: bool = False):
     Returns:
         None: 워크북을 파일로 저장합니다.
     """
+    # Logger 초기화
+    logger = logging.getLogger("applycrypto")
+    
     target_project = config.target_project
     old_code_path = config.artifact_generation.old_code_path if config.artifact_generation else None
 
@@ -140,11 +149,7 @@ def generate_artifact(config: Configuration, use_llm: bool = False):
     if op is None or not op.exists():
         raise FileNotFoundError(f"원본 백업을 찾을 수 없습니다: {old_code_path}")
 
-    print(f"\n[이관 산출물 생성]")
-    print(f"  target_project: {target_project}")
-    print(f"  tp (Path 객체): {tp}")
-    print(f"  tp.name: {tp.name}")
-    print(f"  changelog_file: {changelog_file}")
+    logger.info(f"Step 1 (이관 산출물 생성 시작): target_project={target_project}")
 
     files = read_changedFileList(changelog_file, tp.name)
 
@@ -152,6 +157,8 @@ def generate_artifact(config: Configuration, use_llm: bool = False):
     artifact_dir.mkdir(parents=True, exist_ok=True)
     today = datetime.now().strftime(DATE_FORMAT)
     artifact_file = artifact_dir / f"{tp.name} 이관 산출물 - {today}.xlsx"
+
+    logger.info(f"Step 2 (현재 산출물 생성): {len(files)}개 파일 처리 시작")
 
     # 시트 생성
     wb = openpyxl.Workbook()
@@ -171,7 +178,7 @@ def generate_artifact(config: Configuration, use_llm: bool = False):
     wb.calculation.fullCalcOnLoad = False
     wb.iso_dates = False
 
-    for file_info in files:
+    for idx, file_info in enumerate(files, 1):
         try:
             # dict 형태 보장
             if isinstance(file_info, str):
@@ -191,7 +198,10 @@ def generate_artifact(config: Configuration, use_llm: bool = False):
             except Exception:
                 pass
 
-        except Exception:
+            logger.info(f"  {idx}/{len(files)} {file_info.get(FIELD_FILENAME, '파일')} 처리 완료")
+
+        except Exception as e:
+            logger.warning(f"  {idx}/{len(files)} 파일 처리 실패: {str(e)[:50]}")
             continue
 
     try:
@@ -253,12 +263,12 @@ def generate_artifact(config: Configuration, use_llm: bool = False):
                 ts = datetime.now().strftime(DATE_TIME_FORMAT)
                 artifact_file = artifact_file.with_name(f"{artifact_file.stem}_tmp{ts}{artifact_file.suffix}")
         wb.save(artifact_file)
-        print(f'- 출력 파일: {artifact_file}', flush=True)
+        logger.info(f"Step 2 (출력 파일): {artifact_file}")
     except PermissionError:
         ts = datetime.now().strftime(DATE_TIME_FORMAT)
         fallback = artifact_file.with_name(f"{artifact_file.stem}_fallback{ts}{artifact_file.suffix}")
         wb.save(fallback)
-        print(f'- 출력 파일(대체): {fallback}', flush=True)
+        logger.warning(f"Step 2 (출력 파일-대체): {fallback}")
     return
 
 
@@ -540,17 +550,12 @@ def fill_development_docs(wb: openpyxl.Workbook, file_info: Dict, target_project
     modified_file = Path(target_project) / relative_path
 
     # [DEBUG] 파일 경로 검증
-    print(f"  [DEBUG] 파일 경로 검증:")
-    print(f"    - relative_path: {relative_path}")
-    print(f"    - original_file: {original_file}")
-    print(f"    - modified_file: {modified_file}")
-    print(f"    - original 존재: {original_file.exists()}")
-    print(f"    - modified 존재: {modified_file.exists()}")
+    logger.debug(f"[DEBUG] 파일 경로 검증: relative_path={relative_path}, original={original_file.exists()}, modified={modified_file.exists()}")
     
     if not original_file.exists():
-        print(f"    [⚠️ WARN] 원본 파일을 찾을 수 없음: {original_file}")
+        logger.warning(f"원본 파일을 찾을 수 없음: {original_file}")
     if not modified_file.exists():
-        print(f"    [⚠️ WARN] 수정본 파일을 찾을 수 없음: {modified_file}")
+        logger.warning(f"수정본 파일을 찾을 수 없음: {modified_file}")
 
     original_content = read_file_safe(str(original_file))
     modified_content = read_file_safe(str(modified_file))
@@ -563,7 +568,7 @@ def fill_development_docs(wb: openpyxl.Workbook, file_info: Dict, target_project
 
     blocks = extract_logical_change_blocks(original_lines, modified_lines)
 
-    print(f"- 파일: {file_info['filename']}, blocks 수: {len(blocks)}")
+    logger.debug(f"파일 {file_info['filename']}: {len(blocks)}개 블록")
 
     # LLM 호출인 경우 변경 블록 분석 수행
     if use_llm and llm_provider and blocks:
@@ -693,14 +698,14 @@ def fill_development_docs(wb: openpyxl.Workbook, file_info: Dict, target_project
                     break  # 성공 시 루프 탈출
                 except Exception as e:
                     if attempt == MAX_LLM_RETRIES - 1:
-                        print(f"- 배치 {i//MAX_BLOCKS_PER_LLM_CALL + 1} 최종 실패 (재시도 {MAX_LLM_RETRIES}회): {e}")
+                        logger.error(f"배치 {i//MAX_BLOCKS_PER_LLM_CALL + 1} 최종 실패 (재시도 {MAX_LLM_RETRIES}회): {e}")
                         batch_results = [{}] * len(batch)
                     else:
-                        print(f"- 배치 {i//MAX_BLOCKS_PER_LLM_CALL + 1} 재시도 {attempt + 1}/{MAX_LLM_RETRIES}: {e}")
+                        logger.debug(f"배치 {i//MAX_BLOCKS_PER_LLM_CALL + 1} 재시도 {attempt + 1}/{MAX_LLM_RETRIES}: {e}")
             
             llm_results.extend(batch_results) 
 
-        # print(f"  LLM 호출 시도: {llm_attempt} , 코드 블럭 응답: {len(llm_results)} ")
+        # logger.debug(f"  LLM 호출 시도: {llm_attempt} , 코드 블럭 응답: {len(llm_results)} ")
 
         # LLM 결과를 blocks에 병합
         for i, block in enumerate(blocks):
@@ -781,7 +786,7 @@ def fill_development_docs(wb: openpyxl.Workbook, file_info: Dict, target_project
             else:
                 mod_line_display_value = mod_line
         except Exception as e:
-            print(f"Error creating rich text for goal: {e}")
+            logger.error(f"Rich text 생성 실패 (goal): {e}")
             # fallback to plain text
             if goal:
                 mod_line = f"{mod_line} ({goal})"
@@ -1401,9 +1406,8 @@ def read_changedFileList(changedFileList_file: str, target_project_name: str) ->
     Returns:
         files: 변경 파일 정보의 딕셔너리 리스트 (필드: filename, full_path, relative_path 등)
     """
-    print(f"  [DEBUG] read_changedFileList 시작:")
-    print(f"    - file: {changedFileList_file}")
-    print(f"    - target_project_name: {target_project_name}")
+    logger.debug(f"[DEBUG] read_changedFileList 시작")
+    logger.debug(f"read_changedFileList: file={changedFileList_file}")
     
     if changedFileList_file.endswith('.txt'):
         try:
@@ -1434,7 +1438,7 @@ def read_changedFileList(changedFileList_file: str, target_project_name: str) ->
                         'full_path': cleaned,
                         'relative_path': relative
                     })
-            print(f"  [DEBUG] 총 {len(files)}개 파일 파싱 완료")
+            logger.debug(f"파일 파싱 완료: {len(files)}개")
             return files
         except Exception as e:
             raise ValueError(f"TXT 파일 읽기 실패: {changedFileList_file} - {e}")

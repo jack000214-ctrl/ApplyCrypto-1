@@ -4,7 +4,6 @@ KSIGN 호출 예측보고서 생성기
 """
 
 import ast
-import difflib
 import json
 import logging
 import os
@@ -103,19 +102,26 @@ class EndpointAccess:
 class KSIGNReportGenerator:
     """KSIGN 호출 예측보고서 생성기"""
     
-    CARDINALITY_WEIGHTS = {
-        'multiple': 10.0,   # List, Collection
-        'single': 1.0,      # VO, DTO
-        'none': 0.0,        # void
-    }
-    
-    # New Weight Policy (Spring & Anyframe unified)
     # data_type에 따른 가중치 (LLM이 detect한 데이터 타입)
     DATA_TYPE_WEIGHTS = {
         'single': 1.0,            # Single record: weight = outside counts
         'paged_list': 20.0,       # Paged list: weight = 20 × (inside counts)
         'unpaged_list': 100.0,    # Unpaged list: weight = 100 × (inside counts)
     }
+    
+    # data_type별 설명 (Excel 보고서용)
+    DATA_TYPE_DESCRIPTIONS = {
+        'single': 'Single record: weight = outside counts',
+        'paged_list': 'Paged list: weight = 20 × inside counts',
+        'unpaged_list': 'Unpaged list: weight = 100 × inside counts',
+    }
+    
+    # Input Type 가중치 (Controller 입력 파라미터)
+    DEFAULT_INPUT_WEIGHT = 1.0                    # 기본 입력 가중치
+    MULTIPART_INPUT_WEIGHT = 1000.0              # 파일 업로드 (MultipartHttpServletRequest)
+    
+    # 특수 가중치
+    NESTED_LOOP_WEIGHT = 10.0                    # Nested loop 배수
       
     # Pagination detection patterns and keywords
     PAGINATION_TYPE_PATTERN = re.compile(r'\bpage(?:list)?<', re.IGNORECASE)
@@ -959,8 +965,8 @@ class KSIGNReportGenerator:
         Input Type에 따른 가중치 계산 (Controller 입력 파라미터)
         
         Rule (사용자 요청 기준):
-        - MultipartHttpServletRequest 포함 → 1000 (파일 업로드)
-        - 그 외 → 1 (단건/다건 입력)
+        - MultipartHttpServletRequest 포함 → MULTIPART_INPUT_WEIGHT (파일 업로드)
+        - 그 외 → DEFAULT_INPUT_WEIGHT (단건/다건 입력)
         
         Args:
             input_type: Controller 메서드의 첫 번째 파라미터 타입
@@ -969,16 +975,16 @@ class KSIGNReportGenerator:
             float: 입력 가중치
         """
         if not input_type:
-            return 1.0
+            return self.DEFAULT_INPUT_WEIGHT
         
         input_lower = input_type.lower()
         
         # Rule 1: MultipartHttpServletRequest (파일 업로드)
         if 'multipart' in input_lower or 'multiparthttp' in input_lower:
-            return 1000.0
+            return self.MULTIPART_INPUT_WEIGHT
         
-        # Rule 2: 그 외 (단건/다건 입력 모두 1)
-        return 1.0
+        # Rule 2: 그 외 (단건/다건 입력 모두 DEFAULT_INPUT_WEIGHT)
+        return self.DEFAULT_INPUT_WEIGHT
     
 
     def simplify_type_name(self, type_str: Optional[str]) -> Optional[str]:
@@ -1071,14 +1077,10 @@ class KSIGNReportGenerator:
                         sql_query=query_weight.sql_query if hasattr(query_weight, 'sql_query') else ""
                     )
                 
-                # output_type_simplified 정의 (이미 위에서 정의됨)
-                # output_type_simplified = self.simplify_type_name(output_type) if output_type else None
-                
                 # 가중치 계산
                 input_weight = self.calculate_input_weight(input_type_simplified)
                 
-                # output_weight: data_type 기반 계산 (새 정책)
-                # === UPDATED: 모든 경우에 data_type 기반 weight 적용 (output_type과 무관) ===
+                # output_weight: data_type 기반 계산
                 output_weight = self.DATA_TYPE_WEIGHTS.get(data_type, 1.0)
                 # 단, void인 경우는 0
                 if output_type_simplified and output_type_simplified.lower() == 'void':
@@ -1312,47 +1314,40 @@ class KSIGNReportGenerator:
         ws.column_dimensions['D'].width = 40
         
         row = 2
-        ws[f'B{row}'] = "# Output Type Weights"
-        ws[f'B{row}'].font = self.excel_styles['header_font']
-        row += 1
-        
-        headers = ["Cardinality", "Weight", "Description"]
-        for i, h in enumerate(headers):
-            cell = ws.cell(row=row, column=i+2, value=h)
-            self._apply_cell_style(cell, 'header')
-        row += 1
-        
-        desc_map = {'multiple': 'List, Collection', 'single': 'VO, String', 'none': 'void'}
-        for card, weight in sorted(self.CARDINALITY_WEIGHTS.items()):
-            ws.cell(row=row, column=2, value=card)
-            ws.cell(row=row, column=3, value=weight)
-            ws.cell(row=row, column=4, value=desc_map.get(card, ''))
-            for i in range(3):
-                self._apply_cell_style(ws.cell(row=row, column=i+2))
-            row += 1
-
-        ws[f'B{row}'] = "# Input Type Weight"; ws[f'B{row}'].font = self.excel_styles['header_font']
-        row += 1
-        for i, h in enumerate(headers): self._apply_cell_style(ws.cell(row=row, column=i+2, value=h), 'header')
-        row += 1
-        
-        input_weights = [('MultipartHttpServletRequest', 1000, '파일 업로드'), ('List', 10, '다건 입력 처리'), ('Other', 1, '단건 입력 처리')]
-        for typ, weight, desc in input_weights:
-            ws.cell(row=row, column=2, value=typ); ws.cell(row=row, column=3, value=weight); ws.cell(row=row, column=4, value=desc)
-            for i in range(3): self._apply_cell_style(ws.cell(row=row, column=i+2))
-            row += 1
-            
         # Data Type Weights (New Policy)
-        row += 1
         ws[f'B{row}'] = "# DATA TYPE WEIGHTS (Spring & Anyframe unified)"; ws[f'B{row}'].font = self.excel_styles['header_font']
         row += 1
         headers_dtype = ["Data Type", "Multiplier", "Description"]
         for i, h in enumerate(headers_dtype): self._apply_cell_style(ws.cell(row=row, column=i+2, value=h), 'header')
         row += 1
         
-        dtype_weights = [('single', 1.0, 'Single record: weight = outside counts'), ('paged_list', 20.0, 'Paged list: weight = 20 × inside counts'), ('unpaged_list', 100.0, 'Unpaged list: weight = 100 × inside counts'), ('★Nested loop★', 10.0, 'Paged or Unpaged llop x 10')]
-        for dtype, weight, desc in dtype_weights:
-            ws.cell(row=row, column=2, value=dtype); ws.cell(row=row, column=3, value=weight); ws.cell(row=row, column=4, value=desc)
+        # DATA_TYPE_WEIGHTS를 순회하여 Excel에 작성 (동적 바인딩, 설명은 DATA_TYPE_DESCRIPTIONS에서)
+        for dtype, weight in self.DATA_TYPE_WEIGHTS.items():
+            desc = self.DATA_TYPE_DESCRIPTIONS.get(dtype, '')
+            ws.cell(row=row, column=2, value=dtype)
+            ws.cell(row=row, column=3, value=weight)
+            ws.cell(row=row, column=4, value=desc)
+            for i in range(3): self._apply_cell_style(ws.cell(row=row, column=i+2))
+            row += 1
+        
+        # ★Nested loop★는 특수 케이스로 추가
+        ws.cell(row=row, column=2, value='★Nested loop★')
+        ws.cell(row=row, column=3, value=self.NESTED_LOOP_WEIGHT)
+        ws.cell(row=row, column=4, value='Paged or Unpaged loop x 10')
+        for i in range(3): self._apply_cell_style(ws.cell(row=row, column=i+2))
+        row += 1
+        
+        # MultipartHttpServletRequest (파일업로드) - 특수 케이스
+        row += 1
+        ws[f'B{row}'] = "# Input Type Weight (Special Case)"; ws[f'B{row}'].font = self.excel_styles['header_font']
+        row += 1
+        headers_input = ["Input Type", "Weight", "Description"]
+        for i, h in enumerate(headers_input): self._apply_cell_style(ws.cell(row=row, column=i+2, value=h), 'header')
+        row += 1
+        
+        input_special = [('MultipartHttpServletRequest', self.MULTIPART_INPUT_WEIGHT, '파일 업로드 처리 (input_weight \u00d7 {})'.format(int(self.MULTIPART_INPUT_WEIGHT)))]
+        for typ, weight, desc in input_special:
+            ws.cell(row=row, column=2, value=typ); ws.cell(row=row, column=3, value=weight); ws.cell(row=row, column=4, value=desc)
             for i in range(3): self._apply_cell_style(ws.cell(row=row, column=i+2))
             row += 1
 
@@ -1913,7 +1908,7 @@ class KSIGNReportGenerator:
         
         Step 별 처리:
         - Step 1: config 검증
-        - Step 2: difflib로 변경 파일 추출
+        - Step 2: MD5 해시로 변경 파일 추출
         - Step 3: call_graph.json 로드 + endpoint_reachable_sigs 추출
         - Step 4: 암복호화 가중치 계산 (endpoint 필터링 후 LLM 호출)
         - Step 5: endpoint_access 데이터 로드
@@ -2038,10 +2033,10 @@ class KSIGNReportGenerator:
         return True
     
     def _extract_changed_methods(self) -> bool:
-        """Step 2: 암복호화 적용 코드 추출 (difflib + AST)
+        """Step 2: 암복호화 적용 코드 추출 (MD5 해시 + AST)
         
         구현 방식:
-        1. difflib로 변경된 파일 목록 추출 (원본 vs 수정본 비교)
+        1. MD5 해시로 변경된 파일 목록 추출 (원본 vs 수정본 비교)
         2. AST Parser로 해당 파일의 메서드 추출
         3. 각 메서드에서 ksignUtil 호출 여부 검증
         4. method_signature 목록 생성 (ClassName.methodName)
@@ -2056,7 +2051,7 @@ class KSIGNReportGenerator:
         - self.methods_with_ksignutil: [method_signature, ...]
         """
         try:
-            # 1. difflib로 변경된 Java 파일 목록 추출
+            # 1. MD5 해시로 변경된 Java 파일 목록 추출
             changed_files = self._get_changed_java_files_flexible()
             self.logger.debug(f"변경된 파일: {len(changed_files)}개")
             
@@ -2096,7 +2091,7 @@ class KSIGNReportGenerator:
             return False
     
     def _get_changed_java_files_flexible(self) -> List[str]:
-        """difflib로 변경된 Java 파일 목록 추출 (경로 구조 무관)
+        """MD5 해시로 변경된 Java 파일 목록 추출 (경로 구조 무관)
         
         원본(old_code_path)과 수정본(target_project)을 비교하여:
         - 파일 MD5 해시로 변경 감지
@@ -3651,20 +3646,37 @@ class KSIGNReportGenerator:
     def _load_ksign_weight_prompt(self) -> str:
         """
         Load LLM prompt template from src/generator/ksign_weight_prompt.md
+        Renders Jinja2 template with current weight constants
         
         Returns:
-            str: Prompt template content or None
+            str: Rendered prompt with current weight values
         """
         try:
+            from jinja2 import Template
+            
             prompt_file = Path(__file__).parent / 'ksign_weight_prompt.md'
             if not prompt_file.exists():
                 self.logger.warning(f"ksign_weight_prompt.md not found: {prompt_file}")
                 return None
             
             with open(prompt_file, 'r', encoding='utf-8') as f:
-                return f.read()
+                template_content = f.read()
+            
+            # Render Jinja2 template with weight constants
+            template = Template(template_content)
+            context = {
+                'weights': {
+                    'paged_list': self.DATA_TYPE_WEIGHTS['paged_list'],
+                    'unpaged_list': self.DATA_TYPE_WEIGHTS['unpaged_list'],
+                    'nested_loop': self.NESTED_LOOP_WEIGHT,
+                }
+            }
+            
+            rendered_prompt = template.render(context)
+            return rendered_prompt
+            
         except Exception as e:
-            self.logger.warning(f"Failed to load ksign_weight_prompt.md: {e}")
+            self.logger.warning(f"Failed to load/render ksign_weight_prompt.md: {e}")
             return None
 
     def _calculate_file_weights_with_llm(self, 

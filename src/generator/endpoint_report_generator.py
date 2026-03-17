@@ -45,6 +45,9 @@ BOM_MARKER = '\ufeff'
 # Excel 색상 코드
 COLOR_HEADER = 'DFDFDF'
 
+# Logger 초기화 (모듈 레벨)
+logger = logging.getLogger("applycrypto")
+
 # 열 정보
 COLUMNS = {
     'A': {'width': 3, 'header': ''},
@@ -91,7 +94,7 @@ def generate_endpoint_report(config: Configuration):
     Returns:
         None: 워크북을 파일로 저장합니다.
     """
-    logger = logging.getLogger(__name__)
+    # Logger는 모듈 레벨에서 이미 초기화됨
     
     target_project = config.target_project
     old_code_path = config.artifact_generation.old_code_path if config.artifact_generation else None
@@ -116,21 +119,21 @@ def generate_endpoint_report(config: Configuration):
     if not call_graph_file.exists():
         raise FileNotFoundError(f"Call Graph JSON을 찾을 수 없습니다: {call_graph_file}")
 
-    logger.info(f"Call Graph 로드: {call_graph_file}")
+    logger.info(f"Step 1 (Endpoint 보고서 생성): Call Graph 로드 중")
     call_graph = load_call_graph(str(call_graph_file))
 
     # 변경된 파일 추출
-    logger.info("변경된 파일 비교 시작...")
+    logger.info(f"Step 2: 변경된 파일 비교 시작")
     changed_files = get_changed_java_files(str(tp), str(op))
     
     if not changed_files:
-        logger.warning("변경된 Java 파일이 없습니다. 전체 프로젝트 파일을 사용합니다.")
+        logger.warning(f"Step 2: 변경된 Java 파일이 없음 - 전체 프로젝트 파일 사용")
         changed_files = get_all_java_files(str(tp))
     
-    logger.info(f"비교할 파일 수: {len(changed_files)}")
+    logger.info(f"Step 2: {len(changed_files)}개 파일 비교 시작")
 
     # 메소드 추출 및 엔드포인트 매칭
-    logger.info("메소드 및 엔드포인트 추출 시작...")
+    logger.info(f"Step 3: 메소드 및 엔드포인트 추출 시작")
     endpoint_data_list = []
     
     for file_path in changed_files:
@@ -138,7 +141,7 @@ def generate_endpoint_report(config: Configuration):
             methods = extract_changed_methods(file_path, str(tp), str(op))
             
             if methods:
-                logger.debug(f"파일 {file_path}: 추출된 메소드 = {methods}")
+                logger.debug(f"파일 {file_path}: {len(methods)}개 메소드 추출")
             
             # target_project 기준의 상대 경로 계산 (디렉토리만)
             rel_path = os.path.relpath(file_path, str(tp))
@@ -186,16 +189,12 @@ def generate_endpoint_report(config: Configuration):
     endpoint_data_list.sort()
 
     # 메소드명 검증 (Excel 생성 전)
-    logger.info("\n" + "="*80)
-    logger.info("[메소드명 검증]")
-    logger.info("="*80)
     # 프로젝트의 실제 존재하는 메소드 맵 구축
     actual_methods_map = build_project_method_map(str(tp))
     validate_and_print_method_names(endpoint_data_list, actual_methods_map, str(tp))
 
     # Excel 생성
-    logger.info("\n" + "="*80)
-    logger.info("Excel 생성 시작...")
+    logger.info("Step 4: Excel 생성 중...")
     out_dir = tp / DEFAULT_ARTIFACTS_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     
@@ -204,11 +203,7 @@ def generate_endpoint_report(config: Configuration):
     
     create_endpoint_workbook(endpoint_data_list, str(output_file))
     
-    logger.info(f"End Point 보고서 생성 완료: {output_file}")
-    try:
-        print(f"✓ End Point 보고서 생성 완료: {output_file}")
-    except UnicodeEncodeError:
-        print(f"[OK] End Point 보고서 생성 완료: {output_file}")
+    logger.info(f"Step 4: End Point 보고서 생성 완료 - {output_file}")
 
 
 # =====================================
@@ -686,9 +681,10 @@ def extract_method_ranges_with_ast(file_path: str) -> List[Tuple[Tuple[int, int]
         
         for class_info in class_infos:
             for method in class_info.methods:
-                # Method 객체의 line_start, line_end 사용 (0-based)
-                if method.line_start >= 0 and method.line_end >= 0:
-                    method_ranges.append(((method.line_start, method.line_end), method.name))
+                # Method 객체의 line_number, end_line_number 사용 (1-based)
+                if method.line_number > 0 and method.end_line_number > 0:
+                    # 0-based로 변환하여 저장
+                    method_ranges.append(((method.line_number - 1, method.end_line_number - 1), method.name))
         
         return method_ranges
     except Exception as e:
@@ -1143,56 +1139,38 @@ def validate_and_print_method_names(endpoint_data_list: List[EndPointData], actu
     cross_validate_results = cross_validate_methods_by_regex(actual_methods_map, target_project)
     
     # 결과 출력
-    print(f"\n{'='*80}")
-    print(f"메소드명 검증 결과")
-    print(f"{'='*80}")
-    print(f"총 메소드명: {len(method_names)}개 (중복 포함: {len(endpoint_data_list)}개)")
-    print(f"\n[단계 1] 형식 검증 (ClassName.methodName):")
-    print(f"  [OK] 올바른 형식: {format_ok_count}개")
-    print(f"  [NG] 잘못된 형식: {format_ng_count}개")
-    
-    print(f"\n[단계 2] 교차검증 (정규식으로 AST 결과 재확인):")
-    print(f"  AST parser 발견: {len(actual_methods_map)}개 메소드")
-    print(f"  정규식 재검증:")
-    print(f"    [OK] AST/정규식 모두 일치: {cross_validate_results['both_ok']}개")
-    print(f"    [NG] AST만 발견 (정규식 미확인): {cross_validate_results['ast_only']}개")
-    print(f"  신뢰도: {cross_validate_results['confidence']:.1f}%")
+    logger.info(f"메소드명 검증 결과 - 총 메소드명: {len(method_names)}개")
+    logger.info(f"[단계 1] 형식 검증: [OK] {format_ok_count}개 | [NG] {format_ng_count}개")
+    logger.info(f"[단계 2] 교차검증: AST {len(actual_methods_map)}개 | 신뢰도: {cross_validate_results['confidence']:.1f}%")
     
     # 형식 오류 메소드 출력
     if format_ng_count > 0:
-        print(f"\n{'-'*80}")
-        print(f"[NG] 형식 오류 메소드명 (점(.) 구분자 없음): {format_ng_count}개")
-        print(f"{'-'*80}")
+        logger.warning(f"[NG] 형식 오류 메소드명: {format_ng_count}개")
         
         format_ng_methods_unique = sorted(set(format_ng_methods))
         for idx, invalid_method in enumerate(format_ng_methods_unique, 1):
             count = method_names.get(invalid_method, 1)
             count_str = f"({count}건)" if count > 1 else ""
-            print(f"  {idx:3d}. {invalid_method:<60s} {count_str}")
+            logger.debug(f"  {idx:3d}. {invalid_method:<60s} {count_str}")
     
     # AST만 발견된 메소드 경고
     if cross_validate_results['ast_only'] > 0:
-        print(f"\n{'-'*80}")
-        print(f"[경고] 정규식 확인 실패 메소드: {cross_validate_results['ast_only']}개")
-        print(f"       (AST는 발견했으나 정규식으로 재검증 안 됨)")
-        print(f"{'-'*80}")
+        logger.warning(f"[경고] 정규식 확인 실패 메소드: {cross_validate_results['ast_only']}개")
         
         for idx, method_name in enumerate(cross_validate_results['ast_only_methods'], 1):
             count = method_names.get(method_name, 1)
             count_str = f"({count}건)" if count > 1 else ""
-            print(f"  {idx:3d}. {method_name:<60s} {count_str}")
+            logger.debug(f"{idx:3d}. {method_name} {count_str}")
     
     # 최종 요약
-    print(f"\n{'='*80}")
     has_error = format_ng_count > 0 or cross_validate_results['ast_only'] > 0
     if not has_error:
-        print(f"[OK] 모든 메소드가 프로젝트에 존재하고 교차검증도 통과했습니다!")
+        logger.info(f"[OK] 모든 메소드가 프로젝트에 존재하고 교차검증도 통과")
     else:
         if format_ng_count > 0:
-            print(f"[NG] 형식 오류: {format_ng_count}개")
+            logger.warning(f"[NG] 형식 오류: {format_ng_count}개")
         if cross_validate_results['ast_only'] > 0:
-            print(f"[경고] 교차검증 실패: {cross_validate_results['ast_only']}개")
-    print(f"{'='*80}\n")
+            logger.warning(f"[경고] 교차검증 실패: {cross_validate_results['ast_only']}개")
     
     # 로그 기록
     logger.info(f"메소드명 검증 완료: 총 {len(method_names)}개, 형식OK {format_ok_count}개")

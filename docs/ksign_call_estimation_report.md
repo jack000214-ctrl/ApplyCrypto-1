@@ -1,7 +1,17 @@
 # KSIGN 호출 예측 보고서 구현 명세서
 ## Spring MVC & Anyframe Framework 통합 지원
 
-**최신 업데이트 (2026.03.05)** - v2.2 AST Parser 정확도 향상:
+**최신 업데이트 (2026.03.16)** - v2.5 Enum 타입 및 AST 파싱 강화:
+- **Enum 타입 완벽 지원** ✅:
+  - enum_declaration 인식 및 구분 (ClassInfo.is_enum 플래그)
+  - Enum 필드/메서드/생성자 자동 추출
+  - Enum과 일반 클래스 동시 처리 (암복호화 필드 분석 동일하게 적용)
+- **향상된 AST 순환 참조 방지** ✅:
+  - 경로 기반 추적으로 중복 노드의 다중 경로 방문 지원
+  - 메서드 추출의 정확도 및 안정성 향상
+  - Java AST 복잡한 구조도 정확히 파싱
+  
+**이전 업데이트 (2026.03.05)** - v2.2 AST Parser 정확도 향상:
 - **메서드 추출 방식 개선** ✅:
   - JavaASTParser 기반 정확한 메서드 경계 파악
   - `remove_comments=False` 옵션으로 코드 구조 보존 (주석 제거하면 AST 파싱 실패)
@@ -421,9 +431,9 @@ Estimated KSIGN Calls = Total Weight × Access Count (from endpoint_access.txt) 
 **목적**: 원본과 수정본 코드를 비교하여 변경된 메서드들을 추출하고, 그 중 ksignUtil이 적용된 메서드만 필터링
 
 **구현 방식** (개선됨 2026.03.05):
-1. **difflib로 변경된 파일 감지**
+1. **MD5 해시로 변경된 파일 감지**
    - 원본 프로젝트 (old_code_path)와 수정본 프로젝트 (target_project) 비교
-   - 파일 MD5 해시 기반 변경 판별 (경로 구조 무관)
+   - 파일 MD5 해시를 계산하여 변경 판별 (경로 구조 무관, difflib 미사용)
    - 변경된 Java 파일만 대상으로 선정
 
 2. **AST Parser로 메서드 정확 추출** ✅ (v2.2 개선)
@@ -479,11 +489,10 @@ for method in class_info.methods:
 ```
 
 **구현 참고**:
-- spec_generator.py: `_get_changed_java_files_flexible()` (경로 무관 파일 비교)
-- endpoint_report_generator.py: `extract_changed_methods()` (difflib + AST 기반 메서드 추출)
-  - `identify_changed_lines()`: difflib 라인 변경 감지
-  - `extract_method_ranges_with_ast()`: AST로 메서드 범위 파악
-  - `map_changed_lines_to_methods()`: 변경 라인 → 메서드 매핑
+- ksign_report_generator.py: `_get_changed_java_files_flexible()` (MD5 해시 기반 파일 비교)
+- ksign_report_generator.py: `_extract_changed_methods()` (MD5 기반 변경파일 추출 + AST 메서드 추출)
+  - `_extract_methods_with_ast()`: AST로 메서드 정확 추출
+  - `_filter_methods_by_ksignutil()`: ksignUtil 호출 메서드 필터링
 
 **Step 3**: call_graph.json 로드
 
@@ -778,8 +787,8 @@ public Map<String, List<Item>> getOrderItems(OrderSearchVO vo) {
    - 가중치 계산: 완료
    - 헬퍼 메서드: 완료
 
-5. **Step 2 본격 구현** ✅ (2026.03.03)
-   - difflib 기반 파일 변경 감지
+5. **Step 2 본격 구현** ✅ (2026.03.03, 개선 2026.03.17)
+   - MD5 해시 기반 파일 변경 감지
    - AST Parser 기반 정확한 메서드 추출
    - ksignUtil 호출 메서드 필터링
 
@@ -802,9 +811,9 @@ public Map<String, List<Item>> getOrderItems(OrderSearchVO vo) {
 ## ⚠️ TODO 항목 (우선순위)
 
 ### 우선순위 1 (필수)
-- [x] **Step 2 구현 (2026.03.03)**: difflib + AST 기반 메서드 추출
+- [x] **Step 2 구현 (2026.03.03)**: MD5 해시 + AST 기반 메서드 추출
   - [x] `_extract_changed_methods()` 메서드 구현
-  - [x] `_get_changed_java_files_flexible()` difflib 기반 파일 비교
+  - [x] `_get_changed_java_files_flexible()` MD5 해시 기반 파일 비교
   - [x] `_extract_methods_with_ast()` AST 파서 기반 메서드 추출
   - [x] `_filter_methods_by_ksignutil()` ksignUtil 호출 필터링
 

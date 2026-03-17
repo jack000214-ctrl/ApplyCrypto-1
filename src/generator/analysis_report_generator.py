@@ -16,6 +16,7 @@ import csv
 import hashlib
 import re
 import time
+import logging
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from openpyxl import Workbook
@@ -24,6 +25,11 @@ from openpyxl.styles import Font, Border, Side, Alignment, PatternFill
 from openpyxl.utils import get_column_letter
 from pathlib import Path
 from config.config_manager import Configuration
+
+# =====================================
+# Logger 초기화 (모듈 레벨)
+# =====================================
+logger = logging.getLogger("applycrypto")
 
 # =====================================
 # LLM 번역 관련 상수 (artifact_generator 패턴 참고)
@@ -114,7 +120,7 @@ def generate_analysis_report(config: Configuration, enable_translation: bool = F
     results_paths = []
     wb = Workbook()
 
-    print(f'- AS-IS 분석서 타입 : {modification_type}', flush=True)
+    logger.info(f"Step 1 (AS-IS 분석서 생성 시작): 타입={modification_type}")
 
     # 개요 시트 생성 (수정 타입에 따라 다른 OVERVIEW_ITEMS 사용)
     # 이는 generate_analysis_report() 처리 후반부에서 실제 선택 후 생성됨
@@ -197,7 +203,7 @@ def generate_analysis_report(config: Configuration, enable_translation: bool = F
     # SQL ID 데이터 검증 (--verify 옵션이 있을 때만 실행 및 로그 출력)
     validation_data = None  # 검증 데이터 저장용
     if enable_verification:
-        print(f'- SQL ID 데이터 검증 시작', flush=True)
+        logger.info(f"Step 2 (SQL ID 데이터 검증 시작)")
         try:
             out_dir = os.path.join(applycrypto_root, 'artifacts')
             os.makedirs(out_dir, exist_ok=True)
@@ -215,20 +221,20 @@ def generate_analysis_report(config: Configuration, enable_translation: bool = F
                 missing_count = validation_stats.get('missing_count', 0)
                 
                 if modification_type == 'ThreeStep':
-                    print(f'- SQL ID 검증 결과: table_access({total_table_ids}개) | step1({step1_matched}개) | step2({step2_matched}개) | 누락({missing_count}개)', flush=True)
+                    logger.info(f"Step 2 (SQL ID 검증 결과): table_access({total_table_ids}개) | step1({step1_matched}개) | step2({step2_matched}개) | 누락({missing_count}개)")
                 else:
-                    print(f'- SQL ID 검증 결과: table_access({total_table_ids}개) | step1({step1_matched}개) | 누락({missing_count}개)', flush=True)
+                    logger.info(f"Step 2 (SQL ID 검증 결과): table_access({total_table_ids}개) | step1({step1_matched}개) | 누락({missing_count}개)")
             
             if validation_result:
-                print(f'- SQL ID 데이터 검증 완료 (이상 없음)', flush=True)
+                logger.info(f"Step 2 (SQL ID 데이터 검증 완료): 이상 없음")
             else:
-                print(f'- SQL ID 데이터 검증 완료 (누락된 항목 있음 - 로그 확인)', flush=True)
+                logger.info(f"Step 2 (SQL ID 데이터 검증 완료): 누락된 항목 있음")
         except Exception as e:
-            print(f'- SQL ID 데이터 검증 중 오류 (계속 진행): {e}', flush=True)
+            logger.error(f"Step 2 (SQL ID 데이터 검증 중 오류): {e}")
 
     # LLM을 사용한 번역 처리 (enable_translation이 True인 경우)
     if enable_translation and records:
-        print(f'- LLM 기반 번역 시작', flush=True)
+        logger.info(f"Step 3 (LLM 기반 번역 시작)")
         try:
             from src.modifier.llm.llm_factory import create_llm_provider
             llm_provider = create_llm_provider(config.llm_provider)
@@ -240,16 +246,16 @@ def generate_analysis_report(config: Configuration, enable_translation: bool = F
             # 엑셀에 번역된 결과 반영 (sh2 시트 업데이트)
             _update_sheet_with_translated_records(sh2, records, headers)
             
-            print(f'- LLM 기반 번역 완료', flush=True)
+            logger.info(f"Step 3 (LLM 기반 번역 완료)")
         except Exception as e:
-            print(f'- 번역 처리 중 오류 (계속 진행): {e}', flush=True)
+            logger.error(f"Step 3 (번역 처리 중 오류): {e}")
 
     # SQL ID 검증 시트 추가 (enable_verification이 True인 경우)
     if enable_verification and validation_data:
         try:
             add_validation_sheet(wb, validation_data, font_default, border)
         except Exception as e:
-            print(f'- SQL ID 검증 시트 추가 오류 (계속 진행): {e}', flush=True)
+            logger.error(f"Step 3 (SQL ID 검증 시트 추가 오류): {e}")
 
     # 출력 파일명에 타입 식별자 추가
     date_fragment = datetime.now().strftime('%Y%m%d')
@@ -276,12 +282,12 @@ def generate_analysis_report(config: Configuration, enable_translation: bool = F
         tables = set(r.get('대상테이블', '') for r in records if r.get('대상테이블'))
         wb.active = sh2  # 두 번째 시트(대상목록)를 활성 시트로 설정
         wb.save(artifact_file)
-        print(f'- 분석서 출력 파일 : {artifact_file}', flush=True)
+        logger.info(f"Step 4 (분석서 출력 파일): {artifact_file}")
     except PermissionError:
         ts = datetime.now().strftime('%Y%m%d%H%M%S')
         fallback = artifact_file.with_name(f"{orig_stem}_tmp{ts}{artifact_file.suffix}")
         wb.save(fallback)
-        print(f'- 분석서 출력 파일(임시): {fallback}', flush=True)
+        logger.warning(f"Step 4 (분석서 출력 파일-임시): {fallback}")
         final_path = fallback
 
     results_paths.append(str(final_path))
@@ -413,7 +419,7 @@ def fill_target_list_modification_atype(sh, applycrypto_root=None, repo_name=Non
     invalid_files = []
 
     if not applycrypto_root or not os.path.isdir(applycrypto_root):
-        print(f"- 지정된 경로에 '.applycrypto'가 없습니다: {applycrypto_root}", flush=True)
+        logger.warning(f"지정된 경로에 '.applycrypto'가 없음")
         return sh, []
 
     three_root = os.path.join(applycrypto_root, 'three_step_results')
@@ -771,7 +777,7 @@ def fill_target_list_modification_btype(sh, applycrypto_root=None, repo_name=Non
     invalid_files = []
 
     if not applycrypto_root or not os.path.isdir(applycrypto_root):
-        print(f"- 지정된 경로에 '.applycrypto'가 없습니다: {applycrypto_root}", flush=True)
+        logger.warning(f"지정된 경로에 '.applycrypto'가 없음")
         return sh, []
 
     three_root = os.path.join(applycrypto_root, 'three_step_results')
@@ -1101,7 +1107,7 @@ def get_result_map(table, qid, table_access):
             if found:
                 break
     except Exception:
-        print(f'ResultMap 조회 실패: 테이블 {table}, qid {qid}', flush=True)
+        logger.warning(f'ResultMap 조회 실패')
         rm = 'X'
     return rm
 
@@ -1323,7 +1329,7 @@ def safe_load_json(path, missing_files=None, invalid_files=None, applycrypto_roo
                     rel = os.path.relpath(path, applycrypto_root) if applycrypto_root else path
                 except Exception:
                     rel = path
-                print(f"- 빈 JSON 파일 무시: {rel}", flush=True)
+                logger.debug(f"빈 JSON 파일 무시")
                 return None
         except Exception:
             pass
@@ -1340,10 +1346,10 @@ def safe_load_json(path, missing_files=None, invalid_files=None, applycrypto_roo
             rel = os.path.relpath(path, applycrypto_root) if applycrypto_root else path
         except Exception:
             rel = path
-        print(f"- 파싱 오류 : {rel}", flush=True)
+        logger.debug(f"JSON 파싱 오류")
         return None
     except Exception:
-        print(f"- JSON 로드 실패: {path}", flush=True)
+        logger.warning(f"JSON 로드 실패")
         return None
 
 
@@ -1497,9 +1503,9 @@ def _print_summary(missing_files, invalid_files):
     try:
         if missing_files or invalid_files:
             if missing_files:
-                print(f"- 누락된 JSON 건수: {len(missing_files)}. 첫 파일: {missing_files[0]}", flush=True)
+                logger.warning(f"누락된 JSON 건수: {len(missing_files)}")
             if invalid_files:
-                print(f"- 파싱 오류 JSON 건수: {len(invalid_files)}. 첫 파일: {invalid_files[0]}", flush=True)
+                logger.warning(f"파싱 오류 JSON 건수: {len(invalid_files)}")
     except Exception:
         pass
 
@@ -1655,7 +1661,7 @@ def _update_sheet_with_translated_records(sh: 'Worksheet', records: list, header
                     # 병합된 셀은 건너뛰고 계속 진행
                     pass
     except Exception as e:
-        print(f'- 시트 업데이트 중 오류: {e}', flush=True)
+        logger.error(f"시트 업데이트 중 오류: {e}")
 
 
 class TranslationCache:
@@ -1801,9 +1807,9 @@ JSON 배열로만 응답하세요 (마크다운, 설명, 추가 텍스트 제외
     item_total_length, item_tokens, field_lengths = _calculate_llm_metrics(batch_items, 'atype')
     field_info = ', '.join([f"{field}: {length}자" for field, length in field_lengths.items() if length > 0])
     
-    print(f"  [LLM 호출] atype 배치 - 예상 토큰: {estimated_tokens} (전체: {prompt_length}자, 항목: {item_total_length}자)")
+    logger.info(f"atype 배치 LLM 호출 - 예상 토큰: {estimated_tokens}, 전체: {prompt_length}자, 항목: {item_total_length}자")
     if field_info:
-        print(f"             필드별: {field_info}")
+        logger.debug(f"필드별 크기: {field_info}")
     
     try:
         batch_resp = llm_provider.call(
@@ -1861,7 +1867,7 @@ JSON 배열로만 응답하세요 (마크다운, 설명, 추가 텍스트 제외
         
         return records
     except Exception as e:
-        print(f"- atype 배치 번역 실패: {e} (원본 텍스트 유지)", flush=True)
+        logger.error(f"atype 배치 번역 실패: {e}")
         return records
 
 
@@ -1962,9 +1968,9 @@ JSON 배열로만 응답하세요 (마크다운, 설명, 추가 텍스트 제외
     item_total_length, item_tokens, field_lengths = _calculate_llm_metrics(batch_items, 'btype')
     field_info = ', '.join([f"{field}: {length}자" for field, length in field_lengths.items() if length > 0])
     
-    print(f"  [LLM 호출] btype 배치 - 예상 토큰: {estimated_tokens} (전체: {prompt_length}자, 항목: {item_total_length}자)")
+    logger.info(f"btype 배치 LLM 호출 - 예상 토큰: {estimated_tokens}, 전체: {prompt_length}자, 항목: {item_total_length}자")
     if field_info:
-        print(f"             필드별: {field_info}")
+        logger.debug(f"필드별 크기: {field_info}")
     
     try:
         batch_resp = llm_provider.call(
@@ -2020,7 +2026,7 @@ JSON 배열로만 응답하세요 (마크다운, 설명, 추가 텍스트 제외
         
         return records
     except Exception as e:
-        print(f"- btype 배치 번역 실패: {e} (원본 텍스트 유지)", flush=True)
+        logger.error(f"btype 배치 번역 실패: {e}")
         return records
 
 
@@ -2067,7 +2073,7 @@ def translate_records_batch(records: list, modification_type: str, llm_provider,
                 
                 # 배치 시작 로그
                 warning_msg = ', 경고: 길이 초과' if is_warning else ''
-                print(f"  [배치 {batch_num}] 시작 - 행 {i+1}~{batch_end} ({len(batch)}개 항목{warning_msg})", flush=True)
+                logger.info(f"배치 {batch_num} 시작 - 행 {i+1}~{batch_end} ({len(batch)}개 항목{warning_msg})")
                 
                 future = executor.submit(
                     translate_func,
@@ -2090,16 +2096,16 @@ def translate_records_batch(records: list, modification_type: str, llm_provider,
                     # 결과를 원본 리스트에 병합
                     for j, record in enumerate(batch_result):
                         records[batch_start_idx + j] = record
-                    print(f"  [배치 {batch_num}] 완료 - 행 {batch_start_idx+1}~{batch_end_idx} ✓", flush=True)
+                    logger.info(f"배치 {batch_num} 완료 - 행 {batch_start_idx+1}~{batch_end_idx}")
                 except TimeoutError:
-                    print(f"  [배치 {batch_num}] 실패 - 행 {batch_start_idx+1}~{batch_end_idx} (타임아웃 {LLM_BATCH_TIMEOUT}초) ✗", flush=True)
+                    logger.error(f"배치 {batch_num} 타임아웃 - 행 {batch_start_idx+1}~{batch_end_idx} ({LLM_BATCH_TIMEOUT}초)")
                 except Exception as e:
-                    print(f"  [배치 {batch_num}] 실패 - 행 {batch_start_idx+1}~{batch_end_idx} ({type(e).__name__}: {str(e)[:50]}) ✗", flush=True)
+                    logger.error(f"배치 {batch_num} 실패 - 행 {batch_start_idx+1}~{batch_end_idx}: {type(e).__name__}")
         
-        print(f"- {len(records)}개 레코드 번역 완료", flush=True)
+        logger.info(f"{len(records)}개 레코드 번역 완료")
         return records
     except Exception as e:
-        print(f"- 전체 번역 처리 실패: {e}", flush=True)
+        logger.error(f"전체 번역 처리 실패: {e}")
         return records
 
 
