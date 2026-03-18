@@ -167,7 +167,8 @@ class KSIGNReportGenerator:
         self.results_dir = self.applycrypto_dir / "results"
         self.artifacts_dir = self.applycrypto_dir / "artifacts"
         self.prompt_logs_dir = self.artifacts_dir / "prompt_logs"  # LLM 프롬프트 로깅용
-        self.sanity_reports_dir = self.artifacts_dir / "sanity_reports"  # sanity check 요약 리포트용
+        # sanity_reports_dir는 더 이상 사용하지 않음 (sanity check가 로그 전용으로 변경됨)
+        # self.sanity_reports_dir = self.artifacts_dir / "sanity_reports"
         
         # 타임스탐프 기반 실행 식별자
         self.timestamp = datetime.now().strftime('%Y%m%d_%H%M')
@@ -176,7 +177,7 @@ class KSIGNReportGenerator:
         self.results_dir.mkdir(parents=True, exist_ok=True)
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
         self.prompt_logs_dir.mkdir(parents=True, exist_ok=True)  # prompt_logs 디렉토리 생성
-        self.sanity_reports_dir.mkdir(parents=True, exist_ok=True)
+        # sanity_reports_dir는 더 이상 생성하지 않음
         
         # 데이터 저장소
         self.table_access: List[Dict[str, Any]] = []
@@ -241,7 +242,7 @@ class KSIGNReportGenerator:
             bool: 모든 검증을 통과하면 True, 실패하면 False
         """
         # 검증 1: framework_type이 "Anyframe"으로 시작하는지 확인
-        if not self.framework_type.startswith("Anyframe"):
+        if not self.framework_type.lower().startswith("anyframe"):
             self.logger.error(f"framework_type이 'Anyframe'으로 시작하지 않음 (현재값: {self.framework_type})")
             return False
         
@@ -1251,7 +1252,7 @@ class KSIGNReportGenerator:
             self._add_crypto_weight_sheet(wb)
             
             # Framework 타입에 따라 다른 시트 추가
-            if self.framework_type.startswith("Anyframe"):
+            if self.framework_type.lower().startswith("anyframe"):
                 self._add_anyframe_estimation_detail_sheet(wb)
                 self._add_anyframe_final_report_sheet(wb)
             else:
@@ -1797,7 +1798,7 @@ class KSIGNReportGenerator:
         self.logger.info("=" * 60)
         
         # framework_type에 따라 파이프라인 선택
-        if self.framework_type.startswith("Anyframe"):
+        if self.framework_type.lower().startswith("anyframe"):
             return self.run_full_pipeline_anyframe()
         else:
             # Spring으로 시작하거나 명시되지 않은 경우 기본값으로 Spring 타입 사용
@@ -1948,7 +1949,7 @@ class KSIGNReportGenerator:
         self.logger.info("[Step 2] 암복호화 적용 코드 추출 중...")
         if not self._extract_changed_methods():
             return False
-        self.logger.info(f"Step 1 (Table Access 로드): 변경된 파일 추출 완료")
+        self.logger.info(f"Step 2 (Table Access 로드): 변경된 파일 추출 완료")
         self.logger.info("[Step 2] 완료 ✓")
         
         # Step 3: call_graph.json, table_access_info.json 로드
@@ -1957,7 +1958,7 @@ class KSIGNReportGenerator:
         self.logger.info("[Step 3] call_graph.json 로드 중...")
         if not self._load_call_graph():
             return False
-        self.logger.info(f"Step 2 (Calculate Crypto Weights): call_graph 로드 완료")
+        self.logger.info(f"Step 3 (Calculate Crypto Weights): call_graph 로드 완료")
         self.logger.info("[Step 3] 완료 ✓")
         
         # Step 4: 변경된 클래스에서 ksignUtil weight 계산 및 crypto_weight.json 생성
@@ -1966,7 +1967,7 @@ class KSIGNReportGenerator:
         self.logger.info("[Step 4] 암복호화 가중치 계산 중...")
         if not self._calculate_anyframe_weights():
             return False
-        self.logger.info(f"Step 3 (Enrich Endpoint): 가중치 계산 완료")
+        self.logger.info(f"Step 4 (Enrich Endpoint): 가중치 계산 완료")
         self.logger.info("[Step 4] 완료 ✓")
         
         # Step 5: 런타임 호출빈도 데이터 로드
@@ -1980,7 +1981,7 @@ class KSIGNReportGenerator:
         else:
             self.logger.warning("endpoint_access 데이터 없음 (빈 Dict) - Step 6 스킵됨")
             endpoint_access_dict = {}  # None 대신 빈 Dict 유지
-        self.logger.info(f"Step 4 (Apply Parameter Weights): endpoint_access 로드 완료")
+        self.logger.info(f"Step 5 (Apply Parameter Weights): endpoint_access 로드 완료")
         self.logger.info("[Step 5] 완료 ✓")
         
         # Step 6: call_trees 역탐색으로 메서드 → endpoint 경로 설정 + access_count 매핑
@@ -3241,8 +3242,12 @@ class KSIGNReportGenerator:
           - [a-zA-Z_$] 시작 → 변수명(List 인자)
           - policyId 상수는 negative lookahead로 제외 → 이중 카운트 방지
           - sanitize 코드에서도 안전하게 동작 (리터럴 "P017" → 공백 → [a-zA-Z_$] 불일치)
+          - VO 생성 메서드(setInput, setOutput 등)는 명시적으로 제외 → List-parameter call만 카운트
         """
         patterns: Dict[str, List[re.Pattern]] = {'encrypt': [], 'decrypt': []}
+        
+        # VO 생성 메서드 제외 목록 (List-parameter call이 아닌 VO 구성용 메서드)
+        vo_construction_methods = {'setInput', 'setOutput', 'setPolicyId', 'setData'}
 
         # --- policyId 대안 패턴 구성 ---
         policyid_alts = []
@@ -3284,14 +3289,27 @@ class KSIGNReportGenerator:
             qualifier, _, method_name = method_part.rpartition('.')
             if not method_name:
                 continue
+            
+            # VO 생성 메서드는 건너뜀 (List-parameter call이 아님)
+            if method_name in vo_construction_methods:
+                continue
 
             ml = method_name.lower()
-            if 'encrypt' in ml:
+            # encrypt/decrypt 판단: 메서드 이름 기반
+            # enc/encrypt 포함 → encrypt, dec/decrypt 포함 → decrypt
+            # 판단 불가 시 → 패턴 문자열 전체에서 판단
+            if 'encrypt' in ml or (ml.startswith('enc') and 'dec' not in ml):
                 bucket = 'encrypt'
-            elif 'decrypt' in ml:
+            elif 'decrypt' in ml or (ml.startswith('dec') and 'enc' not in ml):
                 bucket = 'decrypt'
             else:
-                continue
+                # 메서드 이름으로 판단 불가 → 패턴 전체 문자열에서 판단
+                pat_lower = pat_str.lower()
+                if 'encrypt' in pat_lower or 'enc' in pat_lower:
+                    bucket = 'encrypt'
+                else:
+                    # 기본값: decrypt (대부분의 ksigndec 계열)
+                    bucket = 'decrypt'
 
             if bucket not in bucket_info:
                 bucket_info[bucket] = {
@@ -3456,87 +3474,8 @@ class KSIGNReportGenerator:
             return dep0 + 10 * dep1 + 100 * dep2
         return dep0 + dep1 + dep2
 
-    def _apply_llm_weight_sanity_check(self, result: Dict[str, Any], method_code: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """LLM 응답을 실제 target utility 호출 수와 loop depth 기준으로 교정합니다."""
-        audit = {
-            'method_name': result.get('method_name', '<unknown>') if result else '<unknown>',
-            'corrected': False,
-            'reported_loop_depth': 0,
-            'actual_loop_depth': 0,
-            'reported_counts': {},
-            'actual_counts': {},
-            'fields_corrected': [],
-        }
-        if not method_code or not result:
-            return result, audit
-
-        try:
-            reported_depth = int(result.get('loop_depth', 0) or 0)
-        except (TypeError, ValueError):
-            reported_depth = 0
-
-        audit['reported_loop_depth'] = reported_depth
-
-        actual_counts = self._analyze_target_crypto_calls(method_code)
-        actual_depth = actual_counts.get('max_loop_depth', 0)
-        audit['actual_loop_depth'] = actual_depth
-        audit['actual_counts'] = {
-            field: actual_counts.get(field, 0)
-            for field in ['dep0_crypto_count', 'dep1_crypto_count', 'dep2_crypto_count']
-        }
-
-        for field in ['dep0_crypto_count', 'dep1_crypto_count', 'dep2_crypto_count']:
-            try:
-                reported_count = int(result.get(field, 0) or 0)
-            except (TypeError, ValueError):
-                reported_count = 0
-
-            audit['reported_counts'][field] = reported_count
-
-            actual_count = actual_counts.get(field, 0)
-            if reported_count != actual_count:
-                method_name = result.get('method_name', '<unknown>')
-                self.logger.warning(f"{method_name}: {field}={reported_count} → exact target-call count corrected to {actual_count}")
-                result[field] = actual_count
-                audit['corrected'] = True
-                audit['fields_corrected'].append(field)
-
-        if reported_depth <= actual_depth:
-            if actual_depth > reported_depth:
-                result['loop_depth'] = actual_depth
-                audit['corrected'] = True
-                audit['fields_corrected'].append('loop_depth')
-            result['Base Weight'] = self._recalculate_base_weight(result)
-            return result, audit
-
-        method_name = result.get('method_name', '<unknown>')
-        self.logger.warning(f"{method_name}: LLM loop_depth={reported_depth} → sanity check corrected to {actual_depth}")
-
-        result['loop_depth'] = actual_depth
-        audit['corrected'] = True
-        audit['fields_corrected'].append('loop_depth')
-
-        if actual_depth == 0:
-            result['data_type'] = 'single'
-            result['loop_structure'] = ''
-            result['multiplier'] = '1'
-            audit['fields_corrected'].extend(['data_type', 'loop_structure', 'multiplier'])
-        elif actual_depth == 1:
-            loop_structure = result.get('loop_structure', '') or ''
-            if '>' in loop_structure:
-                result['loop_structure'] = loop_structure.split('>')[0].strip()
-                audit['fields_corrected'].append('loop_structure')
-
-            multiplier = result.get('multiplier', '') or ''
-            multiplier_parts = re.split(r'\s*[×*?]\s*', multiplier, maxsplit=1)
-            if len(multiplier_parts) > 1:
-                result['multiplier'] = multiplier_parts[0].strip()
-                audit['fields_corrected'].append('multiplier')
-
-        result['Base Weight'] = self._recalculate_base_weight(result)
-        audit['fields_corrected'].append('Base Weight')
-        audit['fields_corrected'] = sorted(set(audit['fields_corrected']))
-        return result, audit
+    # _apply_llm_weight_sanity_check 메서드 제거됨
+    # LLM 결과를 신뢰하고 sanity check를 수행하지 않음
 
     
 
@@ -3596,52 +3535,8 @@ class KSIGNReportGenerator:
             self.logger.warning(f"프롬프트 로그 저장 실패: {e}")
             return False
 
-    def _save_sanity_audit_summary(self, class_name: str, file_path: str, sanity_audit: List[Dict[str, Any]], result_data: Any) -> Optional[str]:
-        """보정이 발생한 메서드만 별도 요약 JSON으로 저장합니다."""
-        corrected_audits = [audit for audit in (sanity_audit or []) if audit.get('corrected')]
-        if not corrected_audits:
-            return None
-
-        try:
-            safe_class_name = re.sub(r'[<>:"/\\|?*]', '_', class_name)
-            summary_file = self.sanity_reports_dir / f"{safe_class_name}_{self.timestamp}_sanity_summary.json"
-            result_lookup = {}
-            if isinstance(result_data, list):
-                for item in result_data:
-                    if isinstance(item, dict):
-                        method_name = item.get('method_name')
-                        if method_name:
-                            result_lookup[method_name] = item
-
-            summary_data = {
-                'timestamp': datetime.now().isoformat(),
-                'class_name': class_name,
-                'file_path': file_path,
-                'total_methods_analyzed': len(result_data) if isinstance(result_data, list) else 0,
-                'corrected_methods_count': len(corrected_audits),
-                'corrected_methods': [],
-            }
-
-            for audit in corrected_audits:
-                method_name = audit.get('method_name', '<unknown>')
-                summary_data['corrected_methods'].append({
-                    'method_name': method_name,
-                    'reported_loop_depth': audit.get('reported_loop_depth', 0),
-                    'actual_loop_depth': audit.get('actual_loop_depth', 0),
-                    'reported_counts': audit.get('reported_counts', {}),
-                    'actual_counts': audit.get('actual_counts', {}),
-                    'fields_corrected': audit.get('fields_corrected', []),
-                    'final_result': result_lookup.get(method_name, {}),
-                })
-
-            with open(summary_file, 'w', encoding='utf-8') as f:
-                json.dump(summary_data, f, indent=2, ensure_ascii=False)
-
-            self.logger.debug(f"{summary_file.name} 저장")
-            return str(summary_file)
-        except Exception as e:
-            self.logger.warning(f"sanity summary 저장 실패: {e}")
-            return None
+    # _save_sanity_audit_summary 메서드 제거됨
+    # sanity check를 수행하지 않으므로 summary 파일도 생성하지 않음
 
     def _load_ksign_weight_prompt(self) -> str:
         """
@@ -3768,7 +3663,10 @@ class KSIGNReportGenerator:
                     f'Policy ID Filter: {pids}\n'
                     f'  - String-parameter calls: count ONLY when policyId argument matches one of the above\n'
                     f'    (as string literal, constant reference, or variable holding one of these values).\n'
-                    f'  - List-parameter calls: count ALL unconditionally (no policyId to filter).\n'
+                    f'  - List-parameter (VO-based, Pattern A): trace setInput(policyId, ...) in method body;\n'
+                    f'    count ONLY if policyId matches the above.\n'
+                    f'  - List-parameter (Map-based, Pattern B): trace .put(fieldName, policyId) calls on Map;\n'
+                    f'    count ONLY if any value matches the above.\n'
                     f'  - SKIP calls using any other policyId not listed above.'
                 )
 
@@ -3894,18 +3792,7 @@ Return ONLY valid JSON array. No markdown, text, or code blocks."""
                         elif value is None:
                             result[field] = ''
 
-                method_name = result.get('method_name', '')
-                method_code = method_codes.get(method_name, '')
-                _, audit = self._apply_llm_weight_sanity_check(result, method_code)
-                sanity_audit.append(audit)
-
-            prompt_data['sanity_audit'] = sanity_audit
-            prompt_data['sanity_summary_file'] = self._save_sanity_audit_summary(
-                class_name,
-                str(file_path),
-                sanity_audit,
-                results,
-            ) or ''
+            # sanity check 제거: LLM 결과를 신뢰
             
             # 성공 로그 저장
             self._save_prompt_log(class_name, str(file_path), prompt_data, response_content, results)

@@ -1,0 +1,153 @@
+@startuml modifier_diagram
+!theme plain
+skinparam componentStyle rectangle
+skinparam linetype ortho
+skinparam maxMessageSize 30
+skinparam wrapWidth 100
+skinparam packageStyle rectangle
+skinparam nodesep 10
+skinparam ranksep 20
+
+title ApplyCrypto Modifier Component Diagram
+
+package "CLI Layer" {
+  component [CLIController] as CLI
+}
+
+package "Configuration" {
+  component [ConfigManager] as Config
+}
+
+package "Modification" {
+  component [CodeModifier] as CodeModifier
+  component [CodeGenerator] as CodeGenerator
+  component [ControllerServiceGen] as ControllerServiceGen
+  component [ServiceImplBizGen] as ServiceImplBizGen
+  component [TypeHandlerGen] as TypeHandlerGen
+  component [CodeGenFactory] as CodeGenFactory
+  component [ContextGenerator] as ContextGen
+  component [ContextGenFactory] as ContextGenFactory
+  component [JDBCContextGen] as JdbcContextGen
+  component [MyBatisContextGen] as MybatisContextGen
+  component [BatchProcessor] as BatchProcessor
+  component [CodePatcher] as CodePatcher
+  component [ErrorHandler] as ErrorHandler
+  component [ResultTracker] as ResultTracker
+  component [CallChainProcessor] as CallChainProcessor
+}
+
+package "Generator" {
+  component [TypeHandlerGenerator] as TypeHandlerGenerator
+}
+
+package "LLM" {
+  component [LLMFactory] as LLMFactory
+  component [LLMProvider] as LLMProvider
+  component [WatsonX] as WatsonX
+  component [WatsonXOnPrem] as WatsonXOnPrem
+  component [OpenAI] as OpenAI
+  component [ClaudeAI] as Claude
+  component [MockLLM] as MockLLM
+}
+
+package "Storage" {
+  component [DataPersistenceManager] as Persistence
+  component [CacheManager] as Cache
+}
+
+package "Models" {
+  component [TableAccessInfo] as TableAccessModel
+  component [ModificationRecord] as ModRecordModel
+  component [ModificationContext] as ModContextModel
+  component [ModificationPlan] as ModPlanModel
+}
+
+' CLI Layer relationships
+CLI --> Config
+CLI --> CodeModifier
+CLI --> CallChainProcessor
+CLI --> TypeHandlerGenerator
+CLI --> Persistence
+
+' Modification Layer relationships
+CodeModifier --> Config
+CodeModifier --> CodeGenerator
+CodeModifier --> CodePatcher
+CodeModifier --> ErrorHandler
+CodeModifier --> ResultTracker
+CodeModifier --> TableAccessModel
+CodeModifier --> LLMProvider
+CodeGenerator <|-- ControllerServiceGen
+CodeGenerator <|-- ServiceImplBizGen
+CodeGenerator <|-- TypeHandlerGen
+CodeGenFactory --> Config
+CodeGenFactory --> CodeGenerator
+CodeGenFactory --> ControllerServiceGen
+CodeGenFactory --> ServiceImplBizGen
+CodeGenFactory --> TypeHandlerGen
+CodeGenFactory --> LLMProvider
+ControllerServiceGen --> ContextGen
+ControllerServiceGen --> BatchProcessor
+ControllerServiceGen --> LLMProvider
+ServiceImplBizGen --> ContextGen
+TypeHandlerGen --> ContextGen
+ContextGenFactory --> Config
+ContextGenFactory --> ContextGen
+ContextGenFactory --> JdbcContextGen
+ContextGenFactory --> MybatisContextGen
+ContextGen <|-- JdbcContextGen
+ContextGen <|-- MybatisContextGen
+BatchProcessor --> LLMProvider
+CodePatcher --> ErrorHandler
+ResultTracker ..> ModRecordModel : creates
+CallChainProcessor --> Config
+CallChainProcessor --> CodeGenerator
+CallChainProcessor --> CodePatcher
+CallChainProcessor --> LLMProvider
+
+' Generator Layer relationships
+TypeHandlerGenerator --> Config
+
+' LLM Layer relationships
+LLMFactory --> LLMProvider
+LLMFactory --> WatsonX
+LLMFactory --> WatsonXOnPrem
+LLMFactory --> OpenAI
+LLMFactory --> Claude
+LLMFactory --> MockLLM
+WatsonX ..|> LLMProvider
+WatsonXOnPrem ..|> LLMProvider
+OpenAI ..|> LLMProvider
+Claude ..|> LLMProvider
+MockLLM ..|> LLMProvider
+
+' Storage Layer relationships
+Persistence --> Cache
+Persistence ..> ModRecordModel : serializes
+
+note right of CLI
+  CLI Entry Point
+  modify, clear commands
+end note
+
+note right of CodeModifier
+  LLM-based
+  Automatic Code Modification
+end note
+
+note right of CallChainProcessor
+  Call Chain Mode
+  Process by Call Chain
+end note
+
+note right of TypeHandlerGenerator
+  Type Handler Mode
+  MyBatis TypeHandler Generation
+end note
+
+note right of LLMProvider
+  Multi-LLM Support
+  WatsonX, OpenAI, Claude
+end note
+
+@enduml

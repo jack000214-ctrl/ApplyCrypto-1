@@ -1,0 +1,137 @@
+@startuml analyzer_diagram
+!theme plain
+skinparam componentStyle rectangle
+skinparam linetype ortho
+skinparam maxMessageSize 30
+skinparam wrapWidth 100
+skinparam packageStyle rectangle
+skinparam nodesep 10
+skinparam ranksep 20
+
+title ApplyCrypto Analyzer Component Diagram
+
+package "CLI Layer" {
+  component [CLIController] as CLI
+}
+
+package "Configuration" {
+  component [ConfigManager] as Config
+}
+
+package "Collection" {
+  component [SourceFileCollector] as Collector
+}
+
+package "Parsing" {
+  component [JavaASTParser] as JavaParser
+  component [XMLMapperParser] as XMLParser
+  component [CallGraphBuilder] as CallGraph
+  component [EndpointStrategy] as EndpointStrategy
+  component [EndpointStrategyFactory] as EndpointStrategyFactory
+  component [SpringMVCExtraction] as SpringMVC
+  component [AnyframeExtraction] as AnyframeEndpoint
+}
+
+package "Analysis" {
+  component [DBAccessAnalyzer] as DBAnalyzer
+  component [SQLExtractor] as SQLExtractor
+  component [MyBatisExtractor] as MyBatisExtractor
+  component [JDBCExtractor] as JDBCExtractor
+  component [JPAExtractor] as JPAExtractor
+  component [AnyframeExtractor] as AnyframeExtractor
+  component [SQLExtractorFactory] as SQLExtractorFactory
+}
+
+package "Storage" {
+  component [DataPersistenceManager] as Persistence
+  component [CacheManager] as Cache
+}
+
+package "Models" {
+  component [SourceFile] as SourceFileModel
+  component [TableAccessInfo] as TableAccessModel
+  component [Method] as MethodModel
+  component [CallRelation] as CallRelationModel
+  component [Endpoint] as EndpointModel
+}
+
+' CLI Layer relationships
+CLI --> Config
+CLI --> Collector
+CLI --> JavaParser
+CLI --> XMLParser
+CLI --> CallGraph
+CLI --> DBAnalyzer
+CLI --> Persistence
+CLI --> EndpointStrategyFactory
+
+' Collection Layer relationships
+Collector --> Config
+Collector --> JavaParser
+Collector ..> SourceFileModel : creates
+
+' Parsing Layer relationships
+JavaParser --> Cache
+JavaParser ..> MethodModel : creates
+JavaParser ..> CallRelationModel : creates
+XMLParser --> JavaParser
+XMLParser ..> TableAccessModel : creates
+CallGraph --> JavaParser
+CallGraph --> Cache
+CallGraph --> MethodModel
+CallGraph --> CallRelationModel
+CallGraph --> EndpointStrategy
+CallGraph ..> EndpointModel : creates
+EndpointStrategyFactory --> EndpointStrategy
+EndpointStrategyFactory --> SpringMVC
+EndpointStrategyFactory --> AnyframeEndpoint
+EndpointStrategy <|-- SpringMVC
+EndpointStrategy <|-- AnyframeEndpoint
+
+' Analysis Layer relationships
+DBAnalyzer --> Config
+DBAnalyzer --> XMLParser
+DBAnalyzer --> JavaParser
+DBAnalyzer --> CallGraph
+DBAnalyzer --> SQLExtractor
+DBAnalyzer ..> TableAccessModel : creates
+SQLExtractor <|-- MyBatisExtractor
+SQLExtractor <|-- JDBCExtractor
+SQLExtractor <|-- JPAExtractor
+SQLExtractor <|-- AnyframeExtractor
+SQLExtractorFactory --> Config
+SQLExtractorFactory --> SQLExtractor
+SQLExtractorFactory --> MyBatisExtractor
+SQLExtractorFactory --> JDBCExtractor
+SQLExtractorFactory --> JPAExtractor
+SQLExtractorFactory --> AnyframeExtractor
+
+' Storage Layer relationships
+Persistence --> Cache
+Persistence ..> SourceFileModel : serializes
+Persistence ..> TableAccessModel : serializes
+Persistence ..> MethodModel : serializes
+Persistence ..> CallRelationModel : serializes
+Persistence ..> EndpointModel : serializes
+
+note right of CLI
+  CLI Entry Point
+  analyze, list commands
+end note
+
+note right of DBAnalyzer
+  DB Access Pattern Analysis
+  Call Graph Reverse Tracking
+end note
+
+note right of SQLExtractor
+  SQL Extraction Strategy
+  MyBatis, JDBC, JPA, Anyframe
+end note
+
+note right of EndpointStrategy
+  Endpoint Extraction
+  Spring MVC, Anyframe
+end note
+
+@enduml
