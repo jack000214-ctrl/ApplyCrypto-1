@@ -167,9 +167,7 @@ class KSIGNReportGenerator:
         self.results_dir = self.applycrypto_dir / "results"
         self.artifacts_dir = self.applycrypto_dir / "artifacts"
         self.prompt_logs_dir = self.artifacts_dir / "prompt_logs"  # LLM 프롬프트 로깅용
-        # sanity_reports_dir는 더 이상 사용하지 않음 (sanity check가 로그 전용으로 변경됨)
-        # self.sanity_reports_dir = self.artifacts_dir / "sanity_reports"
-        
+
         # 타임스탐프 기반 실행 식별자
         self.timestamp = datetime.now().strftime('%Y%m%d_%H%M')
         
@@ -177,7 +175,6 @@ class KSIGNReportGenerator:
         self.results_dir.mkdir(parents=True, exist_ok=True)
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
         self.prompt_logs_dir.mkdir(parents=True, exist_ok=True)  # prompt_logs 디렉토리 생성
-        # sanity_reports_dir는 더 이상 생성하지 않음
         
         # 데이터 저장소
         self.table_access: List[Dict[str, Any]] = []
@@ -3171,13 +3168,9 @@ class KSIGNReportGenerator:
     def _build_target_crypto_patterns(self, ksignutil_methods: Optional[List[str]] = None) -> Dict[str, List[re.Pattern]]:
         """config 로 전달된 Encryption Utilities 만 정확히 매칭하는 패턴을 생성합니다.
 
-        ksignUtils_pattern + policyId 가 config 에 정의된 경우 policyId-aware 정밀 패턴을 사용합니다.
-        명시적으로 ksignutil_methods 를 전달한 경우(sanity check 제외)는 단순 매칭을 유지합니다.
+        AnyFrame 방식: ksignUtils_pattern에서 메서드명만 추출하여 단순 매칭
+        (policyId 체크는 가중치 계산에 불필요하므로 policyId-aware 패턴 미사용)
         """
-        # policyId-aware 정밀 패턴: self.config 기반 + ksignUtils_pattern + policyId 모두 있을 때만
-        if ksignutil_methods is None and self.ksignutil_patterns and self.policy_ids:
-            return self._build_policyid_aware_patterns()
-
         patterns = {
             'encrypt': [],
             'decrypt': [],
@@ -3213,9 +3206,9 @@ class KSIGNReportGenerator:
                 qualifier = ''
 
             method_name_lower = method_name.lower()
-            if 'encrypt' in method_name_lower:
+            if 'enc' in method_name_lower:
                 bucket = 'encrypt'
-            elif 'decrypt' in method_name_lower:
+            elif 'dec' in method_name_lower:
                 bucket = 'decrypt'
             else:
                 continue
@@ -3407,27 +3400,14 @@ class KSIGNReportGenerator:
         loop_ranges = self._collect_loop_ranges(sanitized_code)
         target_patterns = self._build_target_crypto_patterns(ksignutil_methods)
 
-        # policyId-aware 모드: String 변형 패턴은 원본 코드에서 탐색 (sanitizer가 "P017" 리터럴을 제거하기 때문)
-        # List 변형 패턴은 sanitized 코드에서 탐색해도 안전 ([a-zA-Z_$] 시작 조건으로 구분)
-        use_policyid_mode = (ksignutil_methods is None and bool(self.ksignutil_patterns) and bool(self.policy_ids))
+        # AnyFrame 방식: 단순한 메서드명 매칭만 사용 (policyId 체크 불필요)
+        # sanitized_code에서 안전하게 탐색 가능
 
         for crypto_kind, patterns in target_patterns.items():
             for pattern in patterns:
-                # policyId-aware 모드에서 String 변형 패턴(policyId 인자 포함)은 원본 코드 사용
-                # 판별 기준: 패턴에 '"' 또는 상수 참조가 포함되어 있으면 원본 코드 필요
-                if use_policyid_mode and ('"' in pattern.pattern or any(
-                    re.escape(pid) in pattern.pattern for pid in self.policy_ids if '.' in pid
-                )):
-                    search_code = method_code
-                else:
-                    search_code = sanitized_code
+                search_code = sanitized_code
 
                 for crypto_match in pattern.finditer(search_code):
-                    # 원본 코드 탐색 시: sanitize 처리된 위치(문자열/주석 내부)는 건너뜀
-                    if search_code is method_code:
-                        pos = crypto_match.start()
-                        if pos < len(sanitized_code) and sanitized_code[pos] == ' ' and method_code[pos] != ' ':
-                            continue
                     crypto_index = crypto_match.start()
                     current_depth = sum(
                         1 for loop_start, loop_end in loop_ranges if loop_start < crypto_index < loop_end
