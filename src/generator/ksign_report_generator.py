@@ -1464,8 +1464,20 @@ class KSIGNReportGenerator:
             else:
                 access = w.access_cnt if is_obj else w.get('Jenifer Access Count', 1)
             
+            # 데이터 타입 변환 (Excel/dict에서 문자열로 저장될 수 있음)
+            try:
+                access = int(access) if access else 1
+            except (ValueError, TypeError):
+                access = 1
+            
             # Anyframe Dict: 'Total Weight', Spring CryptoWeight: 'crypto_weight'
             weight = w.crypto_weight if is_obj else w.get('Total Weight', w.get('crypto_weight', 0))
+            
+            # 데이터 타입 변환 (Excel/dict에서 문자열로 저장될 수 있음)
+            try:
+                weight = float(weight) if weight else 0.0
+            except (ValueError, TypeError):
+                weight = 0.0
             
             # blank endpoint는 별도 그룹화하지 말고 그냥 포함 (나중에 정렬으로 하단으로)
             if ep not in endpoint_weights:
@@ -1487,8 +1499,8 @@ class KSIGNReportGenerator:
         )
         
         for r_idx, (endpoint, data) in enumerate(sorted_endpoints, 2):
-            total_weight = data['total_weight']
-            access_cnt = data['access_cnt']
+            total_weight = float(data['total_weight']) if data['total_weight'] else 0.0
+            access_cnt = int(data['access_cnt']) if data['access_cnt'] else 0
             estimated_calls = total_weight * access_cnt
             
             # endpoint가 list인 경우 첫 번째 요소 추출 (Excel cell 쓰기 전 정규화)
@@ -1660,7 +1672,17 @@ class KSIGNReportGenerator:
         target_ep_normalized = target_ep  # 정규화된 버전 저장 (디버깅용)
         
         if not self.endpoint_access:
-            self.logger.warning(f"_get_endpoint_access_count('{target_ep_normalized}'): endpoint_access가 비어있음")
+            # ⚠️ 중요: endpoint_access 데이터가 없으면 경고 로그 + 기본값 반환
+            # Step 6에서 endpoint_access.txt가 없었음을 의미
+            if not hasattr(self, '_endpoint_access_warning_logged'):
+                self.logger.error(
+                    "⚠️ [경고] endpoint_access.txt 파일이 없거나 로드 실패했습니다!\n"
+                    "     → 모든 엔드포인트의 호출빈도가 '1'로 설정됩니다.\n"
+                    "     → Analysis 단계에서 endpoint_access.txt가 생성되는지 확인하세요.\n"
+                    "     → .applycrypto/endpoint_access.txt 파일 확인: " + 
+                    os.path.join(self.target_project, '.applycrypto', 'endpoint_access.txt')
+                )
+                self._endpoint_access_warning_logged = True
             return 1 # 데이터가 없으면 기본값 1
             
         # 1. 바인딩 경로 ({}) 처리 로직
@@ -1739,6 +1761,13 @@ class KSIGNReportGenerator:
                     'estimated_ksign_calls': 0.0,
                     'queries': []
                 }
+            else:
+                # 같은 endpoint의 여러 query에서 access_count 최대값 사용 (모두 같아야 하지만 불일치 시 대비)
+                current_access = 0 if not key else weight.access_cnt
+                self.endpoint_weights[key]['access_count'] = max(
+                    self.endpoint_weights[key]['access_count'], 
+                    current_access
+                )
             
             self.endpoint_weights[key]['total_crypto_weight'] += weight.crypto_weight
             self.endpoint_weights[key]['query_count'] += 1
@@ -1857,6 +1886,16 @@ class KSIGNReportGenerator:
         self.logger.info("[Step 6] 런타임 호출빈도 데이터 로드 중...")
         endpoint_access_dict = self._load_endpoint_access_dict()
         self.load_endpoint_access(endpoint_access_dict)  # 런타임 데이터 로드 (중복 로드 방지)
+        
+        if not self.endpoint_access:
+            self.logger.warning(
+                "⚠️ [경고] endpoint_access 데이터가 로드되지 않았습니다.\n"
+                "     → 모든 엔드포인트의 호출빈도가 기본값 '1'로 설정됩니다.\n"
+                "     → 정확한 예측을 위해 Analysis 단계에서 endpoint_access.txt 생성 확인 필요"
+            )
+        else:
+            self.logger.info(f"✓ endpoint_access 데이터 {len(self.endpoint_access)}개 엔드포인트 로드 완료")
+        
         self.logger.info("[Step 6] 완료 ✓")
         
         # Step 7: 평탄화 (endpoint_results[] → CryptoWeight[] 변환)
