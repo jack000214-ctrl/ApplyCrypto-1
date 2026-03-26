@@ -277,7 +277,13 @@ class BaseMultiStepCodeGenerator(BaseCodeGenerator):
         """
         plan_timestamp = self._get_plan_timestamp()
         if not plan_timestamp:
-            return None
+            plan_timestamp_dir = sorted([d for d in self.output_dir.iterdir() if d.is_dir()], reverse=True)
+            if plan_timestamp_dir:
+                plan_timestamp = plan_timestamp_dir[0].name
+                logger.info(f"plan_timestamp가 명시되지 않아 최신 TimeStamp 디렉토리 사용 : {plan_timestamp}")
+            else:
+                logger.warning(f"plan_timestamp가 명시되지 않았고, 출력 디렉토리에 TimeStamp 폴더가 없습니다: {self.output_dir}")   
+                return None
 
         # 컨텍스트 정보 추출
         table_name = modification_context.table_name

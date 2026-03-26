@@ -397,7 +397,9 @@ python main.py generate-analysis_report --config config.json --verify --trans
 **주요 설정 필드:**
 - `framework_type`: 프레임워크 타입 (SpringMVC, AnyframeSarangOn 등)
 - `sql_wrapping_type`: SQL 래핑 기술 (mybatis, jdbc, jpa)
-- `modification_type`: 코드 수정 방식 (TypeHandler, ControllerOrService, ServiceImplOrBiz)
+- `modification_type`: 코드 수정 방식 및 KSIGN 보고서 파이프라인 선택
+  - 소문자로 "typehandler" 포함: TypeHandler 방식 (mapper.xml 기반 SQL 분석)
+  - "typehandler" 미포함 (예: ThreeStep, TwoStep): ThreeStep 방식 (LLM 기반 코드 분석)
 - `llm_provider`: LLM 프로바이더 (watsonx_ai, openai, claude_ai)
 
 자세한 설정 가이드는 [설정 파일 가이드](docs/config_guide.md)를 참조하세요.

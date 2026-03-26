@@ -77,7 +77,7 @@ class CryptoWeight:
     output_fields_count: int
     input_parameter_type: Optional[str] = None
     output_parameter_type: Optional[str] = None
-    # === LLM 응답과 통일된 필드 (Anyframe) ===
+    # === LLM 응답과 통일된 필드 (ThreeStep 방식) ===
     data_type: str = 'single'  # 'single' | 'paged_list' | 'unpaged_list'
     loop_depth: int = 0  # 0-2
     loop_structure: str = ''
@@ -85,7 +85,7 @@ class CryptoWeight:
     dep0_crypto_count: int = 0  # loop 밖 crypto 호출 수 (루프 깊이=0)
     dep1_crypto_count: int = 0  # depth=1 loop 안 crypto 호출 수
     dep2_crypto_count: int = 0  # depth=2 loop 안 crypto 호출 수
-    # === Spring 호환성 필드 ===
+    # === TypeHandler 방식 필드 ===
     input_parameter_type_weight: float = 1.0
     output_parameter_type_weight: float = 1.0
     crypto_weight: float = 0.0  # 최종 가중치 (base_weight × ksignutil_count × data_type_multiplier)
@@ -198,7 +198,7 @@ class KSIGNReportGenerator:
         
         # config에서 필드 추출
         try:
-            self.framework_type = self.config.get("framework_type", "Spring")
+            self.modification_type = self.config.get("modification_type", "")
             
             # artifact_generation 로드 (dict 또는 객체 모두 처리)
             artifact_gen = self.config.get("artifact_generation")
@@ -215,12 +215,13 @@ class KSIGNReportGenerator:
             # artifact_generation 로드 완료
             self.logger.debug(f"artifact_generation 로드 완료 (키: {list(artifact_gen.keys())})")
             
-            # 이제 artifact_gen은 dict이므로안전하게 접근 가능 (항상 list 보장)
-            self.ksignutil_patterns = artifact_gen.get("ksignUtils_pattern", [])
-            self.policy_ids = artifact_gen.get("policyId", [])
-            
-            # Step 1: 초기화 완료 메시지 (console + log file)
-            self.logger.info(f"Step 0 (Config 로드): ksignutil_patterns {len(self.ksignutil_patterns)}개")
+            if "typehandler" not in self.modification_type.lower():
+                # 이제 artifact_gen은 dict이므로안전하게 접근 가능 (항상 list 보장)
+                self.ksignutil_patterns = artifact_gen.get("ksignUtils_pattern", [])
+                self.policy_ids = artifact_gen.get("policyId", [])
+                
+                # Step 1: 초기화 완료 메시지 (console + log file)
+                self.logger.info(f"Step 0 (Config 로드): ksignutil_patterns {len(self.ksignutil_patterns)}개")
                 
         except (KeyError, AttributeError) as e:
             self.logger.error(f"KSIGNReportGenerator 초기화 실패: {e}")
@@ -231,16 +232,16 @@ class KSIGNReportGenerator:
         """Step 1: config.json의 필수 정보 검증
         
         검증 항목:
-        1. framework_type이 "Anyframe"으로 시작하는지 확인
+        1. modification_type이 설정되었는지 확인
         2. ksignutils_pattern과 policyId가 있는지 확인
         3. 필수 필드가 모두 있는지 확인
         
         Returns:
             bool: 모든 검증을 통과하면 True, 실패하면 False
         """
-        # 검증 1: framework_type이 "Anyframe"으로 시작하는지 확인
-        if not self.framework_type.lower().startswith("anyframe"):
-            self.logger.error(f"framework_type이 'Anyframe'으로 시작하지 않음 (현재값: {self.framework_type})")
+        # 검증 1: modification_type이 설정되었는지 확인
+        if not self.modification_type:
+            self.logger.error(f"modification_type이 설정되지 않음 (현재값: {self.modification_type})")
             return False
         
         # 검증 2: ksignutils_pattern 또는 policyId 존재 여부
@@ -1109,8 +1110,8 @@ class KSIGNReportGenerator:
     def save_crypto_weights_json(self, crypto_weights: Optional[List[Dict[str, Any]]] = None) -> bool:
         """암복호화 가중치를 JSON으로 저장
         
-        Spring 파이프라인용: crypto_weights가 None이면 self.crypto_weights를 Dict로 변환하여 사용
-        Anyframe 파이프라인용: crypto_weights가 제공되면 그 값을 직접 사용
+        TypeHandler 파이프라인용: crypto_weights가 None이면 self.crypto_weights를 Dict로 변환하여 사용
+        ThreeStep 파이프라인용: crypto_weights가 제공되면 그 값을 직접 사용
         
         Args:
             crypto_weights: 암복호화 가중치 리스트 (None이면 self.crypto_weights 사용)
@@ -1118,7 +1119,7 @@ class KSIGNReportGenerator:
         Returns:
             bool: 성공 여부
         """
-        # Spring 파이프라인: self.crypto_weights 사용
+        # TypeHandler 파이프라인: self.crypto_weights 사용
         if crypto_weights is None:
             if not self.crypto_weights:
                 self.logger.warning("crypto_weights가 비어있음")
@@ -1225,7 +1226,7 @@ class KSIGNReportGenerator:
     
 
     def save_ksign_report_excel(self) -> bool:
-        """Step 11 (Anyframe) / Step 9 (Spring): KSIGN 예측 리포트를 Excel로 저장"""
+        """Step 11 (ThreeStep) / Step 9 (TypeHandler): KSIGN 예측 리포트를 Excel로 저장"""
         try:
             import openpyxl
         except ImportError:
@@ -1248,14 +1249,15 @@ class KSIGNReportGenerator:
             self._create_wb_styles(wb)
             self._add_crypto_weight_sheet(wb)
             
-            # Framework 타입에 따라 다른 시트 추가
-            if self.framework_type.lower().startswith("anyframe"):
-                self._add_anyframe_estimation_detail_sheet(wb)
-                self._add_anyframe_final_report_sheet(wb)
+            # Modification 타입에 따라 다른 시트 추가
+            if "typehandler" not in self.modification_type.lower():
+                # TypeHandler가 아니면 ThreeStep 방식 (LLM 분석)
+                self._add_threestep_estimation_detail_sheet(wb)
+                self._add_threestep_final_report_sheet(wb)
             else:
-                # Spring 타입 (기본값)
-                self._add_spring_final_report_sheet(wb)
-                self._add_spring_estimation_detail_sheet(wb)
+                # TypeHandler 방식 (mapper TypeHandler 기반)
+                self._add_typehandler_final_report_sheet(wb)
+                self._add_typehandler_estimation_detail_sheet(wb)
             
             try:
                 wb.save(output_file)
@@ -1313,7 +1315,7 @@ class KSIGNReportGenerator:
         
         row = 2
         # Data Type Weights (New Policy)
-        ws[f'B{row}'] = "# DATA TYPE WEIGHTS (Spring & Anyframe unified)"; ws[f'B{row}'].font = self.excel_styles['header_font']
+        ws[f'B{row}'] = "# DATA TYPE WEIGHTS (TypeHandler & ThreeStep unified)"; ws[f'B{row}'].font = self.excel_styles['header_font']
         row += 1
         headers_dtype = ["Data Type", "Multiplier", "Description"]
         for i, h in enumerate(headers_dtype): self._apply_cell_style(ws.cell(row=row, column=i+2, value=h), 'header')
@@ -1350,8 +1352,8 @@ class KSIGNReportGenerator:
             row += 1
 
 
-    def _add_spring_final_report_sheet(self, wb):
-        """Spring 타입 최종 리포트"""
+    def _add_typehandler_final_report_sheet(self, wb):
+        """TypeHandler 방식 최종 리포트"""
         import openpyxl.utils
         ws = wb.create_sheet("Final Report")
         headers = ['End Point', 'Query Count', 'input_fields_count', 'output_fields_count', 'Total Crypto Weight', 'Jenifer Access Count', 'Estimated KSIGN Calls']
@@ -1383,8 +1385,8 @@ class KSIGNReportGenerator:
             ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = width
 
 
-    def _add_spring_estimation_detail_sheet(self, wb):
-        """Spring 타입 예측 시트 - 쿼리별 상세"""
+    def _add_typehandler_estimation_detail_sheet(self, wb):
+        """TypeHandler 방식 예측 시트 - 쿼리별 상세"""
         import openpyxl.utils
         ws = wb.create_sheet("Ksign Call Estimation")
         headers = ['End Point', 'Method', 'Table', 'Query', 'Input Fields', 'Output Fields', 'Input Type', 'Output Type', 'data_type', 'In Weight', 'Out Weight', 'Total Weight', 'Jenifer Access Count']
@@ -1432,8 +1434,8 @@ class KSIGNReportGenerator:
             ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = width
 
     
-    def _add_anyframe_estimation_detail_sheet(self, wb):
-        """Anyframe 타입 예측 시트 - endpoint별 요약 (4컬럼)"""
+    def _add_threestep_estimation_detail_sheet(self, wb):
+        """ThreeStep 방식 예측 시트 - endpoint별 요약 (4컬럼)"""
         import openpyxl.utils
         
         ws = wb.create_sheet("Final Report")
@@ -1470,7 +1472,7 @@ class KSIGNReportGenerator:
             except (ValueError, TypeError):
                 access = 1
             
-            # Anyframe Dict: 'Total Weight', Spring CryptoWeight: 'crypto_weight'
+            # ThreeStep 방식: 'Total Weight', TypeHandler 방식: 'crypto_weight'
             weight = w.crypto_weight if is_obj else w.get('Total Weight', w.get('crypto_weight', 0))
             
             # 데이터 타입 변환 (Excel/dict에서 문자열로 저장될 수 있음)
@@ -1488,7 +1490,7 @@ class KSIGNReportGenerator:
             
             endpoint_weights[ep]['total_weight'] += weight
         
-        self.logger.debug(f"Anyframe endpoint별 집계: {len(endpoint_weights)}개 엔드포인트, 총 weight= {sum(v['total_weight'] for v in endpoint_weights.values())}")
+        self.logger.debug(f"ThreeStep endpoint별 집계: {len(endpoint_weights)}개 엔드포인트, 총 weight= {sum(v['total_weight'] for v in endpoint_weights.values())}")
         
         sorted_endpoints = sorted(
             endpoint_weights.items(),
@@ -1516,8 +1518,8 @@ class KSIGNReportGenerator:
             ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = width
     
 
-    def _add_anyframe_final_report_sheet(self, wb):
-        """Anyframe 타입 최종 리포트 - method별 상세 (LLM 응답 형식 통일, data_type 추가)"""
+    def _add_threestep_final_report_sheet(self, wb):
+        """ThreeStep 방식 최종 리포트 - method별 상세 (LLM 응답 형식 통일, data_type 추가)"""
         import openpyxl.utils
         
         ws = wb.create_sheet("Ksign Call Estimation")
@@ -1562,7 +1564,7 @@ class KSIGNReportGenerator:
             dep0 = w.dep0_crypto_count if is_obj else w.get('dep0_crypto_count', 0)
             dep1 = w.dep1_crypto_count if is_obj else w.get('dep1_crypto_count', 0)
             dep2 = w.dep2_crypto_count if is_obj else w.get('dep2_crypto_count', 0)
-            # Anyframe Dict: 'crypto_weight' (최종 가중치)
+            # ThreeStep 방식: 'crypto_weight' (최종 가중치)
             total_weight = w.crypto_weight if is_obj else w.get('crypto_weight', w.get('Total Weight', 0))
             data_type = w.data_type if is_obj else w.get('data_type', 'single')
             # Step 6에서 'Jenifer Access Count'로 업데이트됨. Dict는 이를 우선 확인
@@ -1590,7 +1592,7 @@ class KSIGNReportGenerator:
             ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = width
 
     def load_endpoint_access(self, endpoint_dict: Optional[Dict[str, int]] = None) -> bool:
-        """엔드포인트 호출 데이터 로드 (Spring/Anyframe 공통)
+        """엔드포인트 호출 데이터 로드 (TypeHandler/ThreeStep 공통)
         
         .applycrypto/endpoint_access.txt에서 데이터를 로드하여
         EndpointAccess 객체 리스트로 self.endpoint_access에 저장합니다.
@@ -1815,30 +1817,31 @@ class KSIGNReportGenerator:
         """
         전체 파이프라인 실행 (dispatcher)
         
-        framework_type에 따라 적절한 파이프라인 선택:
-        - Spring* : Spring Type (mapper.xml 기반)
-        - Anyframe* : Anyframe Type (SVC/SVCImpl/BIZ 코드 기반)
+        modification_type에 따라 적절한 파이프라인 선택:
+        - TypeHandler 포함 : TypeHandler 방식 (mapper.xml TypeHandler 기반)
+        - TypeHandler 미포함 : ThreeStep 방식 (LLM 분석 기반)
         """
         self.logger.info("=" * 60)
-        self.logger.info(f"KSIGN 호출 예측보고서 생성 파이프라인 [시작!] - {self.framework_type}")
+        self.logger.info(f"KSIGN 호출 예측보고서 생성 파이프라인 [시작!] - modification_type: {self.modification_type}")
         self.logger.info("=" * 60)
         
-        # framework_type에 따라 파이프라인 선택
-        if self.framework_type.lower().startswith("anyframe"):
-            return self.run_full_pipeline_anyframe()
+        # modification_type에 따라 파이프라인 선택
+        if "typehandler" not in self.modification_type.lower():
+            # TypeHandler가 아니면 ThreeStep 방식 (LLM 분석)
+            return self.run_full_pipeline_threestep()
         else:
-            # Spring으로 시작하거나 명시되지 않은 경우 기본값으로 Spring 타입 사용
-            return self.run_full_pipeline_spring()
+            # TypeHandler 방식 - mapper 기반
+            return self.run_full_pipeline_typehandler()
     
 
-    def run_full_pipeline_spring(self) -> bool:
+    def run_full_pipeline_typehandler(self) -> bool:
         """
-        Spring Type 파이프라인 실행
+        TypeHandler 방식 파이프라인 실행
         
         수정 전 코드를 analyze, modify 수행 후 generate_ksign 수행
         mapper.xml에 암복호화 TypeHandler를 적용하는 방식
         """
-        self.logger.info("[Framework] Spring Type - mapper.xml 기반 처리")
+        self.logger.info("[Framework] TypeHandler 방식 - mapper.xml 기반 처리")
         
         # Step 1: table_access_info.json 로드
         self.logger.info("")
@@ -1937,9 +1940,9 @@ class KSIGNReportGenerator:
         return True
     
 
-    def run_full_pipeline_anyframe(self) -> bool:
+    def run_full_pipeline_threestep(self) -> bool:
         """
-        Anyframe Type 전체 파이프라인 (Step 1~9)
+        ThreeStep 전체 파이프라인 (Step 1~9)
         
         SVC/SVCImpl/BIZ layer 암복호화 코드 분석 + call_graph 기반 endpoint 매핑
         
@@ -1957,7 +1960,7 @@ class KSIGNReportGenerator:
         Returns:
             bool: 성공 여부
         """
-        self.logger.info(f"[Framework] Anyframe Type - SVC/SVCImpl/BIZ 코드 기반 처리")
+        self.logger.info(f"[Framework] ThreeStep - SVC/SVCImpl/BIZ 코드 기반 처리")
         self.logger.info(f"Step 0 (Config 로드): ksignutil_patterns {len(self.ksignutil_patterns)}개")
         
         # Step 1: 추출 대상 ksignUtil 항목 검증
@@ -1968,7 +1971,7 @@ class KSIGNReportGenerator:
             return False
         
         # Step 1 검증 성공 - 로드된 값 확인
-        self.logger.debug(f"framework_type: {self.framework_type}")
+        self.logger.debug(f"modification_type: {self.modification_type}")
         if self.ksignutil_patterns:
             self.logger.debug(f"ksignUtils_pattern ({len(self.ksignutil_patterns)}개)")
             for pattern in self.ksignutil_patterns[:5]:  # 처음 5개만 출력
@@ -2001,7 +2004,7 @@ class KSIGNReportGenerator:
         self.logger.info("")
         self.logger.info("-" * 60)
         self.logger.info("[Step 4] 암복호화 가중치 계산 중...")
-        if not self._calculate_anyframe_weights():
+        if not self._calculate_threestep_weights():
             return False
         self.logger.info(f"Step 4 (Enrich Endpoint): 가중치 계산 완료")
         self.logger.info("[Step 4] 완료 ✓")
@@ -2051,7 +2054,7 @@ class KSIGNReportGenerator:
         self.logger.info("")
         self.logger.info("-" * 60)
         self.logger.info("[Step 8] 최종 KSIGN 호출 예측 리포트 생성 중...")
-        if not self._generate_anyframe_ksign_report():
+        if not self._generate_threestep_ksign_report():
             return False
         self.logger.info("[Step 8] 완료 ✓")
         
@@ -2355,7 +2358,7 @@ class KSIGNReportGenerator:
             endpoints_count = len(self.call_graph.get('endpoints', []))
             self.logger.info(f"call_graph.json 로드 완료: {endpoints_count}개 엔드포인트")
             
-            # === Anyframe 전용: call_trees에서 endpoint에 도달 가능한 method_signature Set 추출 ===
+            # === ThreeStep 방식 전용: call_trees에서 endpoint에 도달 가능한 method_signature Set 추출 ===
             # call_graph 구조:
             #   endpoints[]: {path, method_signature, ...}  ← HTTP endpoint 목록
             #   call_trees[]: {method_signature, children: [{method_signature, children: [...]}]}
@@ -2478,7 +2481,7 @@ class KSIGNReportGenerator:
             bool: 성공 여부
         """
         try:
-            # Anyframe: self.crypto_weights 직접 사용, Spring: self.crypto_weights_with_endpoints
+            # ThreeStep 방식: self.crypto_weights 직접 사용, TypeHandler 방식: self.crypto_weights_with_endpoints
             if hasattr(self, 'crypto_weights_with_endpoints') and self.crypto_weights_with_endpoints:
                 crypto_weights = self.crypto_weights_with_endpoints
             elif hasattr(self, 'crypto_weights') and self.crypto_weights:
@@ -2594,7 +2597,7 @@ class KSIGNReportGenerator:
             traceback.print_exc()
             return {}
 
-    def _calculate_anyframe_weights(self) -> bool:
+    def _calculate_threestep_weights(self) -> bool:
         """
         Step 4: 암복호화 가중치 계산
         
@@ -2754,12 +2757,12 @@ class KSIGNReportGenerator:
                         # 따라서 여기서는 ksignutil_count만 곱하면 됨 (data_type_multiplier는 불필요)
                         base_weight = weight_info.get('base_weight', weight_info.get('Base Weight', 1))
                         
-                        # CryptoWeight 객체 생성 - LLM 응답 형식과 통일 (Anyframe용)
+                        # CryptoWeight 객체 생성 - LLM 응답 형식과 통일 (ThreeStep 방식용)
                         crypto_weight = {
                             'method_signature': method_sig,
                             'class_path': weight_info.get('class_path', str(file_path)),
-                            'table_name': '',  # Anyframe에서는 사용하지 않음
-                            'query_id': '',    # Anyframe에서는 사용하지 않음
+                            'table_name': '',  # ThreeStep 방식에서는 사용하지 않음
+                            'query_id': '',    # ThreeStep 방식에서는 사용하지 않음
                             'end_point': None,  # Step 6: call_graph 매핑에서 채워짐
                             'input_fields_count': 0,  # Spring과의 호환성
                             'output_fields_count': 0,  # Spring과의 호환성
@@ -2821,7 +2824,7 @@ class KSIGNReportGenerator:
                 self.logger.info(f"총 {len(crypto_weights)}개 weight 계산 완료 ({len(successful_files)}개 파일에서 추출)")
                 self.crypto_weights = crypto_weights  # Step 4에서 사용할 수 있도록 저장
                 
-                # === NEW: Anyframe Dict에 대해 access_cnt 업데이트 ===
+                # === NEW: ThreeStep 방식 결과에 대해 access_cnt 업데이트 ===
                 # endpoint_access가 로드되어 있으면 Dict의 access_cnt를 업데이트
                 if self.endpoint_access:
                     for crypto_weight_dict in crypto_weights:
@@ -2970,7 +2973,7 @@ class KSIGNReportGenerator:
         3. 필드 업데이트:
            - end_point: 호출 endpoint (첫 번째)
            - Jenifer Access Count: 총 접근 횟수
-           - access_cnt: Anyframe Dict용 (호환성)
+           - access_cnt: ThreeStep 방식용 (호환성)
         
         Args:
             crypto_weights: LLM이 생성한 weight 정보
@@ -3071,12 +3074,12 @@ class KSIGNReportGenerator:
                     
                     # Dict와 CryptoWeight 객체 모두 호환되도록 업데이트
                     crypto_weight['Jenifer Access Count'] = total_access_count
-                    crypto_weight['access_cnt'] = total_access_count  # Anyframe Dict도 함께 업데이트
+                    crypto_weight['access_cnt'] = total_access_count  # ThreeStep 방식 결과도 함께 업데이트
                     crypto_weight['end_point'] = related_endpoints[0]  # 주 엔드포인트 (첫번째)
                 else:
                     # 관련 엔드포인트 없음 (call_graph에 없는 메서드)
                     crypto_weight['Jenifer Access Count'] = 0
-                    crypto_weight['access_cnt'] = 0  # Anyframe Dict도 함께 업데이트
+                    crypto_weight['access_cnt'] = 0  # ThreeStep 방식 결과도 함께 업데이트
                     crypto_weight['end_point'] = None
             
             matched_with_access = len([x for x in crypto_weights if x.get('Jenifer Access Count', 0) > 0])
@@ -3207,7 +3210,7 @@ class KSIGNReportGenerator:
     def _build_target_crypto_patterns(self, ksignutil_methods: Optional[List[str]] = None) -> Dict[str, List[re.Pattern]]:
         """config 로 전달된 Encryption Utilities 만 정확히 매칭하는 패턴을 생성합니다.
 
-        AnyFrame 방식: ksignUtils_pattern에서 메서드명만 추출하여 단순 매칭
+        ThreeStep 방식: ksignUtils_pattern에서 메서드명만 추출하여 단순 매칭
         (policyId 체크는 가중치 계산에 불필요하므로 policyId-aware 패턴 미사용)
         """
         patterns = {
@@ -3439,7 +3442,7 @@ class KSIGNReportGenerator:
         loop_ranges = self._collect_loop_ranges(sanitized_code)
         target_patterns = self._build_target_crypto_patterns(ksignutil_methods)
 
-        # AnyFrame 방식: 단순한 메서드명 매칭만 사용 (policyId 체크 불필요)
+        # ThreeStep 방식: 단순한 메서드명 매칭만 사용 (policyId 체크 불필요)
         # sanitized_code에서 안전하게 탐색 가능
 
         for crypto_kind, patterns in target_patterns.items():
@@ -3827,7 +3830,7 @@ Return ONLY valid JSON array. No markdown, text, or code blocks."""
     
 
 
-    def _generate_anyframe_ksign_report(self) -> bool:
+    def _generate_threestep_ksign_report(self) -> bool:
         """
         Step 8: 최종 엔드포인트별 집계 및 ksign_report.json 생성
         
