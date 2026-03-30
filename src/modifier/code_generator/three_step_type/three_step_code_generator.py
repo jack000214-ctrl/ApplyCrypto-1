@@ -125,7 +125,7 @@ class ThreeStepCodeGenerator(BaseMultiStepCodeGenerator):
 
     def _get_output_subdir_name(self) -> str:
         """출력 디렉토리 하위 폴더명 반환"""
-        return "three_step_results"
+        return "modify_results"
 
     def _get_step_config(self) -> ThreeStepConfig:
         """ThreeStepConfig 반환"""

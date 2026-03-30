@@ -103,7 +103,7 @@ class BaseMultiStepCodeGenerator(BaseCodeGenerator):
         출력 디렉토리 하위 폴더명을 반환합니다.
 
         Returns:
-            str: 출력 디렉토리명 (예: 'two_step_results', 'three_step_results')
+            str: 출력 디렉토리명 (예: 'modify_results')
         """
         pass
 

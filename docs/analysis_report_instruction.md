@@ -11,7 +11,7 @@
 
 ## A. 목적 및 개요
 
-**핵심 기능**: 대상 프로젝트의 `.applycrypto/three_step_results` 디렉터리에 저장된 분석 JSON 파일들(step1_query_analysis.json, step2_planning.json, table_access_info.json)을 읽어서, 암호화 대상 테이블 및 쿼리의 AS-IS 분석서를 Excel 형식으로 생성합니다.
+**핵심 기능**: 대상 프로젝트의 `.applycrypto/modify_results` 디렉터리에 저장된 분석 JSON 파일들(step1_query_analysis.json, step2_planning.json, table_access_info.json)을 읽어서, 암호화 대상 테이블 및 쿼리의 AS-IS 분석서를 Excel 형식으로 생성합니다.
 
 **산출물**: `{target_project}/.applycrypto/artifacts/AsIs_Analysis_Report_{TYPE}_{YYYYMMDD}.xlsx`
 - TYPE: 분석 유형 (ThreeStep 또는 TypeHandler)
@@ -29,7 +29,7 @@
 ```
 {target_project}
 ├── .applycrypto/
-│   ├── three_step_results/
+│   ├── modify_results/
 │   │   └── [일시]/
 │   │       └── [테이블명]/
 │   │           └── [컨트롤러명]/
@@ -553,7 +553,7 @@ MODIFICATION_TYPE_GROUPS = {
 
 **알고리즘** (table_access 기준):
 ```
-1. applycrypto_root/three_step_results 하위의 최신 일시 폴더 찾기
+1. applycrypto_root/modify_results 하위의 최신 일시 폴더 찾기
 2. table_access_info.json에서 모든 SQL ID 추출
    → 이 리스트의 SQL ID들을 기준으로 처리 (Master)
 3. step1/step2 데이터를 사전 캐시 (모든 테이블/컨트롤러 조합)
@@ -596,7 +596,7 @@ def qid_match_for_flow(a, b):
 
 **알고리즘**:
 ```
-1. applycrypto_root/three_step_results 하위의 최신 일시 폴더 찾기
+1. applycrypto_root/modify_results 하위의 최신 일시 폴더 찾기
 2. 각 [테이블명] 폴더 → 각 [컨트롤러명] 폴더 순회
 3. step1_query_analysis.json만 로드 (step2 미사용)
 4. table_access의 각 SQL ID에 대해:
@@ -864,7 +864,7 @@ python main.py generate-analysis_report --config config.json
 ```
 
 **동작**:
-1. three_step_results의 최신 폴더 탐색
+1. modify_results의 최신 폴더 탐색
 2. step1 + step2 데이터 결합
 3. 17개 컬럼 분석서 생성
 4. 출력: `AsIs_Analysis_Report_ThreeStep_20250203.xlsx`
@@ -877,7 +877,7 @@ python main.py generate-analysis_report --config config.json
 ```
 
 **동작**:
-1. three_step_results의 최신 폴더 탐색
+1. modify_results의 최신 폴더 탐색
 2. step1 데이터만 사용
 3. 12개 컬럼 분석서 생성
 4. 출력: `AsIs_Analysis_Report_TypeHandler_20250203.xlsx`
@@ -1078,7 +1078,7 @@ python main.py generate-analysis_report --config config.json
 ## E. Implementation notes (실제 구현 특이사항):
 
 - 진입점: 코드의 진입점은 `generate_analysis_report(config: Configuration)`이며, `config.target_project`의 `{target_project}\.applycrypto`를 기준으로 동작합니다.
-- `three_step_results` 하위에 여러 타임스탬프(일시)가 존재하면 코드에서는 디렉터리명을 정렬한 뒤 마지막 항목(가장 최신으로 가정)을 사용합니다.
+- `modify_results` 하위에 여러 타임스탬프(일시)가 존재하면 코드에서는 디렉터리명을 정렬한 뒤 마지막 항목(가장 최신으로 가정)을 사용합니다.
 - 전역 참조 파일: `{target_project}\.applycrypto\results\table_access_info.json`을 참조하여 `ResultMap` 여부와 매퍼/소스 경로를 판별합니다. 이 파일이 없거나 파싱 실패 시에는 로그/요약에 파싱 오류를 보고하되 전체 프로세스를 중단하지 않습니다.
 - `modification_type` 처리: 코드에서는 내부 그룹 매핑(예: `ThreeStep` → atype, `TypeHandler`/`TypeHandler` → btype)을 사용하며, 입력값에 대해 키워드 부분 일치(substring, case-insensitive)를 허용해 유연하게 canonical type으로 변환합니다.
 - `ResultMap` 반환 규칙: `table_access_info.json` 내 `sql_queries[].strategy_specific`에 `result_map`이 없으면 `'X'`, `result_map`은 있으나 `result_field_mappings`이 없으면 `'△'`, 둘 다 존재하면 `'○'`를 반환합니다.

@@ -82,7 +82,7 @@ def generate_analysis_report(config: Configuration, enable_translation: bool = F
     AS-IS 분석서 생성기 래퍼 함수
 
     `config`에서 지정한 `target_project`의 `.applycrypto` 디렉터리를 찾아
-    `three_step_results`를 이용해 `대상목록` 시트를 채웁니다.
+    `modify_results`를 이용해 `대상목록` 시트를 채웁니다.
 
     Args:
         config (Configuration): 설정 객체
@@ -422,15 +422,15 @@ def fill_target_list_modification_atype(sh, applycrypto_root=None, repo_name=Non
         logger.warning(f"지정된 경로에 '.applycrypto'가 없음")
         return sh, []
 
-    three_root = os.path.join(applycrypto_root, 'three_step_results')
-    if not os.path.isdir(three_root):
+    modify_root = os.path.join(applycrypto_root, 'modify_results')
+    if not os.path.isdir(modify_root):
         return sh, []
 
-    ts_dirs = [d for d in os.listdir(three_root) if os.path.isdir(os.path.join(three_root, d))]
+    ts_dirs = [d for d in os.listdir(modify_root) if os.path.isdir(os.path.join(modify_root, d))]
     if not ts_dirs:
         return sh, []
     latest = sorted(ts_dirs)[-1]
-    latest_root = os.path.join(three_root, latest)
+    latest_root = os.path.join(modify_root, latest)
 
     table_access = safe_load_json(
         os.path.join(applycrypto_root, 'results', 'table_access_info.json'),
@@ -780,15 +780,15 @@ def fill_target_list_modification_btype(sh, applycrypto_root=None, repo_name=Non
         logger.warning(f"지정된 경로에 '.applycrypto'가 없음")
         return sh, []
 
-    three_root = os.path.join(applycrypto_root, 'three_step_results')
-    if not os.path.isdir(three_root):
+    modify_root = os.path.join(applycrypto_root, 'modify_results')
+    if not os.path.isdir(modify_root):
         return sh, []
 
-    ts_dirs = [d for d in os.listdir(three_root) if os.path.isdir(os.path.join(three_root, d))]
+    ts_dirs = [d for d in os.listdir(modify_root) if os.path.isdir(os.path.join(modify_root, d))]
     if not ts_dirs:
         return sh, []
     latest = sorted(ts_dirs)[-1]
-    latest_root = os.path.join(three_root, latest)
+    latest_root = os.path.join(modify_root, latest)
 
     table_access = safe_load_json(
         os.path.join(applycrypto_root, 'results', 'table_access_info.json'),
@@ -2215,19 +2215,19 @@ def _validate_sql_id_existence(applycrypto_root, modification_type, output_dir=N
         with open(table_access_path, 'r', encoding='utf-8') as f:
             table_access = json.load(f)
         
-        # three_step_results 최신 폴더 찾기
-        three_root = os.path.join(applycrypto_root, 'three_step_results')
-        if not os.path.isdir(three_root):
-            _log_info(f"[SQL ID 검증] three_step_results 디렉터리를 찾을 수 없습니다")
+        # modify_results 최신 폴더 찾기
+        modify_root = os.path.join(applycrypto_root, 'modify_results')
+        if not os.path.isdir(modify_root):
+            _log_info(f"[SQL ID 검증] modify_results 디렉터리를 찾을 수 없습니다")
             return True, {'total_table_ids': 0, 'step1_matched': 0, 'step2_matched': 0, 'missing_count': 0}, []
         
-        ts_dirs = sorted([d for d in os.listdir(three_root) if os.path.isdir(os.path.join(three_root, d))])
+        ts_dirs = sorted([d for d in os.listdir(modify_root) if os.path.isdir(os.path.join(modify_root, d))])
         if not ts_dirs:
-            _log_info(f"[SQL ID 검증] three_step_results 내 결과 디렉터리를 찾을 수 없습니다")
+            _log_info(f"[SQL ID 검증] modify_results 내 결과 디렉터리를 찾을 수 없습니다")
             return True, {'total_table_ids': 0, 'step1_matched': 0, 'step2_matched': 0, 'missing_count': 0}, []
         
         latest = ts_dirs[-1]
-        latest_root = os.path.join(three_root, latest)
+        latest_root = os.path.join(modify_root, latest)
         
         # table_access_info에서 테이블별 SQL ID 추출
         # 순수 배열 형식: [{table_name, columns[], sql_queries[]}, ...]

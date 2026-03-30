@@ -1147,13 +1147,13 @@ class KSIGNReportGenerator:
         Step 1-2에서 저장된 계층적 구조의 쿼리 분석 결과 로드
         (최신 타임스탐프 폴더 중 데이터가 있는 폴더 선택)
         """
-        three_step_dir = self.applycrypto_dir / "three_step_results"
-        if not three_step_dir.exists():
-            self.logger.error("three_step_results 디렉토리 없음")
+        modify_root = self.applycrypto_dir / "modify_results"
+        if not modify_root.exists():
+            self.logger.error("modify_results 디렉토리 없음")
             return False
         
         # 모든 타임스탐프 디렉토리를 최신순으로 정렬
-        timestamp_dirs = sorted([d for d in three_step_dir.iterdir() if d.is_dir()], reverse=True)
+        timestamp_dirs = sorted([d for d in modify_root.iterdir() if d.is_dir()], reverse=True)
         if not timestamp_dirs:
             self.logger.error("타임스탐프 디렉토리 없음")
             return False
