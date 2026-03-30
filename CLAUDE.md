@@ -26,7 +26,7 @@ python main.py modify --config config.json            # Apply changes
 # Clear analysis results
 python main.py clear  # Remove cached analysis data
 
-# Launch Streamlit UI
+# Launch NiceGUI UI
 python run_ui.py
 ```
 

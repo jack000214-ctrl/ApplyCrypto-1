@@ -18,7 +18,7 @@ Tests are in `tests/` (`test_*.py`), docs/diagrams in `docs/`, examples in `exam
 - `pytest`: run full test suite with verbose output and coverage (configured in `pyproject.toml`).
 - `pytest --cov=src --cov-report=html`: generate HTML coverage report.
 - `./scripts/lint.ps1`: run `isort`, `ruff format`, and `ruff check --fix`.
-- `python run_ui.py`: start Streamlit UI.
+- `python run_ui.py`: start NiceGUI UI.
 
 ## Coding Style & Naming Conventions
 Use Python 3.13+, 4-space indentation, and type hints for public interfaces where practical.  

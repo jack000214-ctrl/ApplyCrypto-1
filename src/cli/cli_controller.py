@@ -172,7 +172,7 @@ class CLIController:
         modify_parser.add_argument(
             "--force",
             action="store_true",
-            help="LLM이 수정 불필요로 판단한 파일도 강제로 재시도합니다 (이미 암호화가 구현된 파일도 재수정)",
+            help="LLM이 수정 불필요로 판단한 파일도 강제로 재시도합니다.",
         )
         modify_parser.add_argument(
             "--target-table",

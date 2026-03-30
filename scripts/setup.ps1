@@ -102,6 +102,10 @@ Confirm-Success "오류: 프로젝트를 편집 모드로 설치 실패."
 & $pipExe install --no-index --find-links=$WHEEL_PATH -r $REQUIREMENTS_FILE
 Confirm-Success "오류: 패키지 설치 실패."
 
+# 4. requirements-ui.txt 패키지 설치 (NiceGUI UI)
+& $pipExe install --no-index --find-links=$WHEEL_PATH -r requirements-ui.txt
+Confirm-Success "오류: UI 패키지 설치 실패."
+
 # applycrypto 명령어 확인
 Write-Host "'applycrypto' 명령어 확인 중..."
 if (Get-Command applycrypto -ErrorAction SilentlyContinue) {

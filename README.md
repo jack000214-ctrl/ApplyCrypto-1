@@ -205,6 +205,26 @@ python initialize_template.py
 
 applycrypto --help
 ```
+## Web UI 실행
+
+ApplyCrypto는 NiceGUI 기반의 웹 UI를 제공합니다.
+
+```powershell
+# NiceGUI 의존성 설치
+pip install -r requirements-ui.txt
+
+# UI 실행
+python run_ui.py
+```
+
+브라우저에서 `http://localhost:8502` 접속
+
+**주요 기능:**
+- 단계별 워크플로우 (명령 선택 → 옵션 설정 → Config 확인 → 실행)
+- IBM Carbon Design 스타일 적용
+- 실시간 실행 결과 표시
+- 직관적인 좌측 네비게이션 바
+
 
 ## 테스트 실행
 
