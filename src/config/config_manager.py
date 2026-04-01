@@ -117,6 +117,13 @@ class Configuration(BaseModel):
         None, description="이관 산출물 생성 설정"
     )
 
+    generate_template_path: Optional[str] = Field(
+        None,
+        description="템플릿 파일들이 위치한 디렉토리 경로 (예: ./src/templates/three_step_type/banka/). "
+        "템플릿 파일명은 고정: data_mapping_template.md, planning_template.md, "
+        "execution_template.md (또는 execution_template_method.md)"
+    )
+
     source_file_types: List[str] = Field(
         ..., description="수집할 소스 파일 확장자 목록"
     )

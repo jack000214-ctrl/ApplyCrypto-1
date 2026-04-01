@@ -72,48 +72,83 @@ class ThreeStepCodeGenerator(BaseMultiStepCodeGenerator):
             model_id=self.three_step_config.execution_model,
         )
 
-        # 템플릿 로드
-        template_dir = Path(__file__).parent
+        # 템플릿 경로 설정 및 검증
+        if not self.config.generate_template_path:
+            raise ValueError(
+                f"\n{'='*60}\n"
+                f" [오류] generate_template_path가 설정되지 않았습니다\n"
+                f"{'='*60}\n\n"
+                f"config.json에 다음 항목을 추가해주세요:\n"
+                f'  "generate_template_path": "./src/templates/three_step_type/banka/"\n\n'
+                f"프로젝트 타입별 템플릿 경로:\n"
+                f"  - Banka: ./src/templates/three_step_type/banka/\n"
+                f"  - CCS: ./src/templates/three_step_type/ccs/\n"
+                f"  - Sarangon: ./src/templates/three_step_type/sarangon/\n"
+                f"  - Base: ./src/templates/three_step_type/base/\n"
+                f"{'='*60}"
+            )
+        
+        template_dir = Path(self.config.generate_template_path)
+        
+        # 상대 경로인 경우 프로젝트 루트 기준으로 변환
+        if not template_dir.is_absolute():
+            project_root = Path(__file__).parent.parent.parent.parent.parent
+            template_dir = project_root / self.config.generate_template_path
+        
+        # 고정된 템플릿 파일명
         self.data_mapping_template_path = template_dir / "data_mapping_template.md"
         self.planning_template_path = template_dir / "planning_template.md"
-
-
-        if self.config.generate_type == "full_source":
-            execution_template_name = "execution_template_full.md"
-        elif self.config.generate_type == "diff":
-            execution_template_name = "execution_template_diff.md"
-        elif self.config.generate_type == "method":
-            # method 모드는 서브클래스(ThreeStepBankaCodeGenerator)가
-            # _get_execution_template_path()를 오버라이드하여 전용 템플릿 사용
-            execution_template_name = "execution_template_full.md"
+        
+        # Step 3 템플릿: generate_type에 따라 선택
+        if self.config.generate_type == "method":
+            execution_template_name = "execution_template_method.md"
         else:
-            raise NotImplementedError(
-                f"Unsupported generate_type for ThreeStepCodeGenerator: {self.config.generate_type}"
-            )
-
+            # full_source, diff, part 등은 모두 execution_template.md 사용
+            execution_template_name = "execution_template.md"
+        
         self.execution_template_path = template_dir / execution_template_name
-
+        
+        # 템플릿 파일 존재 여부 검증
+        missing_templates = []
         for template_path in [
             self.data_mapping_template_path,
             self.planning_template_path,
             self.execution_template_path,
         ]:
             if not template_path.exists():
-                raise FileNotFoundError(
-                    f"\n{'='*60}\n"
-                    f" [오류] 템플릿 파일을 찾을 수 없습니다\n"
-                    f"{'='*60}\n\n"
-                    f"찾으려는 파일:\n"
-                    f"  {template_path.name}\n\n"
-                    f"예상 경로:\n"
-                    f"  {template_path}\n\n"
-                    f"💡 해결 방법:\n"
-                    f"  모든 템플릿은 'src/templates' 디렉토리 구조 내에 정의되어야 합니다.\n"
-                    f"  '{template_path.parent}' 디렉토리 아래에\n"
-                    f"  '{template_path.name}' 파일을 생성하거나 복사해주세요.\n\n"
-                    f"  파일을 위치시킨 후 다시 실행해 주세요.\n"
-                    f"{'='*60}"
-                )
+                missing_templates.append(template_path)
+        
+        if missing_templates:
+            error_msg = (
+                f"\n{'='*60}\n"
+                f" [오류] 필수 템플릿 파일을 찾을 수 없습니다\n"
+                f"{'='*60}\n\n"
+                f"템플릿 디렉토리:\n"
+                f"  {template_dir}\n\n"
+                f"누락된 파일:\n"
+            )
+            for template_path in missing_templates:
+                error_msg += f"  - {template_path.name}\n"
+            
+            error_msg += (
+                f"\n💡 해결 방법:\n"
+                f"  해당 디렉토리에 다음 파일들을 생성하세요:\n"
+                f"     - data_mapping_template.md (Step 1용)\n"
+                f"     - planning_template.md (Step 2용)\n"
+            )
+            
+            # generate_type에 따라 필요한 Step 3 템플릿 안내
+            if self.config.generate_type == "method":
+                error_msg += f"     - execution_template_method.md (Step 3용, method 모드)\n"
+            else:
+                error_msg += f"     - execution_template.md (Step 3용, {self.config.generate_type} 모드)\n"
+            
+            error_msg += (
+                f"\n  ℹ️  현재 generate_type이 '{self.config.generate_type}'이므로\n"
+                f"     위 3개 파일만 있으면 됩니다.\n"
+                f"{'='*60}"
+            )
+            raise FileNotFoundError(error_msg)
 
         # BaseContextGenerator.create_batches()에서 토큰 계산을 위해 사용하는 속성
         self.template_path = self.planning_template_path

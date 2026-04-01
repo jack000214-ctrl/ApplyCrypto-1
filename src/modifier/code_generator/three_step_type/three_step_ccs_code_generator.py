@@ -68,29 +68,12 @@ class ThreeStepCCSCodeGenerator(ThreeStepCodeGenerator):
         # CCS 유틸리티 정보 초기화
         self.ccs_util_info = self._get_ccs_util_info()
 
-        # CCS 전용 템플릿 경로 설정
-        template_dir = Path(__file__).parent
-        self.data_mapping_template_ccs_path = (
-            template_dir / "data_mapping_template_ccs.md"
-        )
-        self.planning_template_ccs_path = (
-            template_dir / "planning_template_ccs.md"
-        )
-        self.execution_template_ccs_path = (
-            template_dir / "execution_template_ccs.md"
-        )
-
-        # CCS 템플릿 존재 여부 확인
-        required_templates = [
-            self.data_mapping_template_ccs_path,
-            self.planning_template_ccs_path,
-            self.execution_template_ccs_path,
-        ]
-        for template_path in required_templates:
-            if not template_path.exists():
-                raise FileNotFoundError(
-                    f"CCS 템플릿을 찾을 수 없습니다: {template_path}"
-                )
+        # CCS는 부모 클래스(ThreeStepCodeGenerator)의 템플릿을 그대로 사용
+        # generate_template_path에 CCS 전용 템플릿 디렉토리를 지정하면 됨
+        # 예: generate_template_path: "./src/templates/three_step_type/ccs/"
+        
+        # 부모 클래스에서 이미 템플릿 경로 설정 및 검증 완료
+        # 추가 CCS 전용 로직이 필요한 경우 여기에 구현
 
         # 로깅
         if self.ccs_util_info:
@@ -267,7 +250,7 @@ class ThreeStepCCSCodeGenerator(ThreeStepCodeGenerator):
             "sql_queries_with_mappings": sql_queries_with_mappings,
         }
 
-        template_str = self._load_template(self.data_mapping_template_ccs_path)
+        template_str = self._load_template(self.data_mapping_template_path)
         return self._render_template(template_str, variables)
 
     def _extract_column_to_alias_mapping(
@@ -826,8 +809,8 @@ class ThreeStepCCSCodeGenerator(ThreeStepCodeGenerator):
             "masking_util": masking_util,    # Jinja2 치환용: BCMaskingUtil 등
         }
 
-        # CCS 전용 planning 템플릿 사용
-        template_str = self._load_template(self.planning_template_ccs_path)
+        # CCS planning 템플릿 사용 (부모 클래스 경로)
+        template_str = self._load_template(self.planning_template_path)
         return self._render_template(template_str, variables)
 
     # ========== Phase 3 헬퍼: Instruction 포맷 변환 ==========
@@ -1005,8 +988,8 @@ class ThreeStepCCSCodeGenerator(ThreeStepCodeGenerator):
             "masking_util_import": masking_util_import,  # 전체 import 경로
         }
 
-        # CCS 전용 execution 템플릿 사용
-        template_str = self._load_template(self.execution_template_ccs_path)
+        # CCS execution 템플릿 사용 (부모 클래스 경로)
+        template_str = self._load_template(self.execution_template_path)
         prompt = self._render_template(template_str, variables)
 
         return prompt, index_to_path, file_mapping, path_to_content

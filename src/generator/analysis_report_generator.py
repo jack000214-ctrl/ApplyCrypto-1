@@ -432,6 +432,8 @@ def fill_target_list_modification_atype(sh, applycrypto_root=None, repo_name=Non
     latest = sorted(ts_dirs)[-1]
     latest_root = os.path.join(modify_root, latest)
 
+    logger.info(f'  - Modify Results path : {latest_root}')
+
     table_access = safe_load_json(
         os.path.join(applycrypto_root, 'results', 'table_access_info.json'),
         missing_files=missing_files,
@@ -789,6 +791,8 @@ def fill_target_list_modification_btype(sh, applycrypto_root=None, repo_name=Non
         return sh, []
     latest = sorted(ts_dirs)[-1]
     latest_root = os.path.join(modify_root, latest)
+
+    logger.info(f'  - Modify Results path : {latest_root}')
 
     table_access = safe_load_json(
         os.path.join(applycrypto_root, 'results', 'table_access_info.json'),

@@ -61,8 +61,25 @@ class ThreeStepBatchBaseCodeGenerator(ThreeStepCodeGenerator):
         # name_only 여부 판단
         self._is_name_only = self._check_name_only_columns()
 
+        # 템플릿 디렉토리 결정
+        if not self.config.generate_template_path:
+            raise ValueError(
+                f"\n{'='*60}\n"
+                f" [오류] generate_template_path가 설정되지 않았습니다\n"
+                f"{'='*60}\n\n"
+                f"config.json에 다음 항목을 추가해주세요:\n"
+                f'  "generate_template_path": "./src/templates/three_step_type/batch/"\n\n'
+                f"{'='*60}"
+            )
+        
+        template_dir = Path(self.config.generate_template_path)
+        
+        # 상대 경로인 경우 프로젝트 루트 기준으로 변환
+        if not template_dir.is_absolute():
+            project_root = Path(__file__).parent.parent.parent.parent.parent
+            template_dir = project_root / self.config.generate_template_path
+
         # 서브클래스가 제공하는 템플릿 경로
-        template_dir = Path(__file__).parent
         paths = self._get_batch_template_paths(template_dir)
         self._batch_data_mapping_template = paths["data_mapping"]
         self._batch_planning_template = paths["planning"]
@@ -72,7 +89,9 @@ class ThreeStepBatchBaseCodeGenerator(ThreeStepCodeGenerator):
         for tmpl_name, tmpl_path in paths.items():
             if not tmpl_path.exists():
                 raise FileNotFoundError(
-                    f"템플릿을 찾을 수 없습니다: {tmpl_path}"
+                    f"배치 템플릿을 찾을 수 없습니다: {tmpl_path}\n"
+                    f"config.json의 generate_template_path 설정을 확인하거나, "
+                    f"템플릿 파일을 해당 경로에 배치해주세요."
                 )
 
     # ========== 서브클래스 구현 필수 ==========

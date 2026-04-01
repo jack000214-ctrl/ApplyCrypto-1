@@ -942,14 +942,18 @@ def validate_json(json_str: str) -> tuple[bool, str]:
 
 def scroll_output_to_bottom():
     """실행 로그 영역을 최신 로그(하단)로 자동 스크롤"""
-    ui.run_javascript(
-        """
-        const el = document.querySelector('.execution-output-container');
-        if (el) {
-            el.scrollTop = el.scrollHeight;
-        }
-        """
-    )
+    try:
+        ui.run_javascript(
+            """
+            const el = document.querySelector('.execution-output-container');
+            if (el) {
+                el.scrollTop = el.scrollHeight;
+            }
+            """
+        )
+    except RuntimeError:
+        # 다른 탭이 닫혀 NiceGUI 컨텍스트가 무효화된 경우 무시
+        pass
 
 
 def set_execute_button_running_state(is_running: bool):

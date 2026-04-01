@@ -60,26 +60,11 @@ class ThreeStepRps2CodeGenerator(ThreeStepCodeGenerator):
         super().__init__(config)
         self._java_parser = JavaASTParser()
 
-        # method 모드용 execution 템플릿 로드
-        if self.config.generate_type == "method":
-            template_dir = Path(__file__).parent
-            self._method_execution_template_path = (
-                template_dir / "execution_template_banka_method.md"
-            )
-            if not self._method_execution_template_path.exists():
-                raise FileNotFoundError(
-                    f"Method 모드 execution 템플릿을 찾을 수 없습니다: "
-                    f"{self._method_execution_template_path}"
-                )
-
+        # method 모드용 execution 템플릿은 부모 클래스에서 이미 설정됨
+        # (execution_template_method.md로 고정)
+        
         # Phase 3 method 모드에서 메서드 인덱스 매핑 (프롬프트 생성 → 응답 파싱 간 공유)
         self._method_index_map: Dict[int, MethodIndexEntry] = {}
-
-    def _get_execution_template_path(self) -> Path:
-        """method 모드일 때 전용 method-level 템플릿 반환"""
-        if self.config.generate_type == "method":
-            return self._method_execution_template_path
-        return super()._get_execution_template_path()
 
     # ========== session_dir 오버라이드 ==========
 

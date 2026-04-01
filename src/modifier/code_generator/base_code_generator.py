@@ -64,45 +64,11 @@ class BaseCodeGenerator(ABC):
         self._prompt_cache = prompt_cache if prompt_cache is not None else {}
         self.config = config
 
+        # template_path가 제공된 경우에만 설정 (레거시 호환성)
+        # 현재 모든 실제 구현체는 BaseMultiStepCodeGenerator를 상속받으며,
+        # 자체 __init__을 구현하므로 이 코드는 실행되지 않습니다.
         if template_path:
             self.template_path = Path(template_path)
-        else:
-            # 클래스가 정의된 모듈의 경로를 찾음 (상속 시 해당 클래스 위치 기준)
-            module = sys.modules[self.__class__.__module__]
-            if hasattr(module, "__file__") and module.__file__:
-                template_dir = Path(module.__file__).parent
-            else:
-                template_dir = Path(__file__).parent
-
-            # generate_type 설정에 따라 템플릿 파일 선택
-            if config.generate_type == "full_source":
-                template_filename = "template_full.md"
-            elif config.generate_type == "diff":
-                template_filename = "template_diff.md"
-            elif config.generate_type == "part":
-                template_filename = "template_part.md"
-            else:
-                raise ValueError(f"Unsupported generate_type: {config.generate_type}")
-
-
-            self.template_path = template_dir / template_filename
-
-        if not self.template_path.exists():
-            raise FileNotFoundError(
-                f"\n{'='*60}\n"
-                f" [오류] 템플릿 파일을 찾을 수 없습니다\n"
-                f"{'='*60}\n\n"
-                f"찾으려는 파일:\n"
-                f"  {self.template_path.name}\n\n"
-                f"예상 경로:\n"
-                f"  {self.template_path}\n\n"
-                f"💡 해결 방법:\n"
-                f"  모든 템플릿은 'src/templates' 디렉토리 구조 내에 정의되어야 합니다.\n"
-                f"  '{self.template_path.parent}' 디렉토리 아래에\n"
-                f"  '{self.template_path.name}' 파일을 생성하거나 복사해주세요.\n\n"
-                f"  파일을 위치시킨 후 다시 실행해 주세요.\n"
-                f"{'='*60}"
-            )
 
         # 토큰 인코더 초기화
         self._init_token_encoder()

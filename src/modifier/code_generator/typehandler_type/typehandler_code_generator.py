@@ -21,33 +21,9 @@ class TypeHandlerCodeGenerator(ThreeStepCodeGenerator):
     
     def __init__(self, config: Configuration):
         super().__init__(config)
-
-        # 템플릿 경로를 현재 클래스 파일 위치 기준으로 재설정
-        template_dir = Path(__file__).parent
-        self.data_mapping_template_path = template_dir / "data_mapping_template.md"
-        self.planning_template_path = template_dir / "planning_template.md"
-
-        # Execution 템플릿은 설정에 따라 결정
-        if self.config.generate_type == "full_source":
-            execution_template_name = "execution_template_full.md"
-        elif self.config.generate_type == "diff":
-            execution_template_name = "execution_template_diff.md"
-        else:
-            execution_template_name = "execution_template_full.md"
-            
-        self.execution_template_path = template_dir / execution_template_name
         
-        # 토큰 계산용 템플릿 경로 업데이트
-        self.template_path = self.planning_template_path
-
-        # 템플릿 파일 존재 여부 확인
-        for template_path in [
-            self.data_mapping_template_path,
-            self.planning_template_path,
-            self.execution_template_path,
-        ]:
-            if not template_path.exists():
-                logger.warning(f"Template file not found at local path: {template_path}, falling back to parent default might be safer or raise error.")
+        # 부모 클래스(ThreeStepCodeGenerator)에서 이미 템플릿 경로를 설정하고 검증했으므로
+        # 추가 작업이 필요 없음. 필요시 여기서 TypeHandler 전용 로직 추가 가능
 
     def _execute_planning_phase(
         self,

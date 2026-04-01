@@ -52,3 +52,14 @@ else {
     Write-Host "ERROR: Failed to download development dependencies. Exit code: $LASTEXITCODE" -ForegroundColor Red
     exit $LASTEXITCODE
 }
+
+# 4. Download UI Dependencies: Run pip wheel -r requirements-ui.txt -w ./wheels
+Write-Host "Downloading UI dependencies (NiceGUI)..."
+pip wheel -r requirements-ui.txt -w $wheelsDir
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "UI dependencies downloaded successfully." -ForegroundColor Green
+}
+else {
+    Write-Host "ERROR: Failed to download UI dependencies. Exit code: $LASTEXITCODE" -ForegroundColor Red
+    exit $LASTEXITCODE
+}
