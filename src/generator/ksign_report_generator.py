@@ -1240,7 +1240,7 @@ class KSIGNReportGenerator:
         if not tp.exists():
             raise FileNotFoundError(f"타겟 프로젝트를 찾을 수 없습니다: {self.target_project}")        
         
-        output_file = self.artifacts_dir / f"{tp.name}_ksign_call_report_{date_str}.xlsx"
+        output_file = self.artifacts_dir / f"{tp.name} - ksign 호출 리포트_{date_str}.xlsx"
         
         try:
             wb = openpyxl.Workbook()

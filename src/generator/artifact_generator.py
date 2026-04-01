@@ -156,7 +156,7 @@ def generate_artifact(config: Configuration, use_llm: bool = False):
     artifact_dir = Path(out_dir)
     artifact_dir.mkdir(parents=True, exist_ok=True)
     today = datetime.now().strftime(DATE_FORMAT)
-    artifact_file = artifact_dir / f"{tp.name} 이관 산출물 - {today}.xlsx"
+    artifact_file = artifact_dir / f"{tp.name} - 이관산출물_{today}.xlsx"
 
     logger.info(f"Step 2 (현재 산출물 생성): {len(files)}개 파일 처리 시작")
 

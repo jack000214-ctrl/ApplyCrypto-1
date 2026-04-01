@@ -3,12 +3,13 @@
   "_usage": "Copy this file to config.json and modify according to your project",
 
   "target_project": "/path/to/your/java/project",
+  "generate_template_path": "./src/templates/three_step_type/banka/",
   "source_file_types": [".java", ".xml"],
   "sql_wrapping_type": "mybatis",
   "framework_type": "SpringMVC",
   "ccs_prefix": null,
   "llm_provider": "watsonx_ai",
-  "generate_type": "full_source",
+  "generate_type": "full",
   "access_tables": [
     {
       "table_name": "tb_employee",
@@ -144,6 +145,38 @@
         "mode": "execution_only",
         "plan_timestamp": "20250123_143052"
       }
+    }
+  },
+
+  "_comment_generate_template_path": "=== Template Path Configuration ===",
+  "_generate_template_path_description": "템플릿 파일들이 위치한 디렉토리 경로를 최상위 레벨에 지정합니다.",
+  "_generate_template_path_note": "템플릿 파일명은 고정: data_mapping_template.md, planning_template.md, execution_template.md (또는 execution_template_method.md)",
+  
+  "_generate_template_path_example": {
+    "_description": "템플릿 경로 설정 예시 (최상위 레벨)",
+    "generate_template_path": "./src/templates/three_step_type/banka/"
+  },
+
+  "_template_file_names": {
+    "_description": "각 단계별 고정된 템플릿 파일명",
+    "step1": "data_mapping_template.md (ThreeStep의 데이터 매핑 단계)",
+    "step2": "planning_template.md (Planning 단계)",
+    "step3_full": "execution_template.md (generate_type=full, diff, part일 때)",
+    "step3_method": "execution_template_method.md (generate_type=method일 때)"
+  },
+
+  "_generate_template_path_examples_by_type": {
+    "_threestep_banka": {
+      "generate_template_path": "./src/templates/three_step_type/banka/"
+    },
+    "_threestep_ccs": {
+      "generate_template_path": "./src/templates/three_step_type/ccs/"
+    },
+    "_twostep": {
+      "generate_template_path": "./src/templates/two_step_type/"
+    },
+    "_typehandler": {
+      "generate_template_path": "./src/templates/typehandler_type/"
     }
   },
 

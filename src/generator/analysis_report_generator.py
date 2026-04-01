@@ -259,7 +259,7 @@ def generate_analysis_report(config: Configuration, enable_translation: bool = F
 
     # 출력 파일명에 타입 식별자 추가
     date_fragment = datetime.now().strftime('%Y%m%d')
-    output_filename_t = f'AsIs_Analysis_Report_{modification_type}_{date_fragment}.xlsx'
+    output_filename_t = f'{repo_name} - Asis 분석서_{date_fragment}.xlsx'
     output_path = os.path.join(out_dir, output_filename_t)
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)

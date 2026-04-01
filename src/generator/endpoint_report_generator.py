@@ -199,7 +199,7 @@ def generate_endpoint_report(config: Configuration):
     out_dir.mkdir(parents=True, exist_ok=True)
     
     today = datetime.now().strftime(DATE_FORMAT)
-    output_file = out_dir / f"EndPoint_Report_{today}.xlsx"
+    output_file = out_dir / f"{tp.name} - 엔드포인트 리포트_{today}.xlsx"
     
     create_endpoint_workbook(endpoint_data_list, str(output_file))
     

@@ -214,7 +214,7 @@ def generate_spec(config: Configuration, zip_output=False, diff_mode=False, llm_
                     service_name = out_path.name
         except Exception:
             service_name = out_path.name
-        zip_name = f"{service_name}_specs_{date_str}.zip"
+        zip_name = f"{service_name} - 프로그램사양서_{date_str}.zip"
         zip_path = out_path / zip_name
         try:
             with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
@@ -319,8 +319,8 @@ def generate_spec(config: Configuration, zip_output=False, diff_mode=False, llm_
         if out_path.exists():
             for existing_file in out_path.iterdir():
                 if existing_file.is_file() and existing_file.suffix == '.xlsx':
-                    # 같은 날짜 패턴의 모든 파일 확인: *_{date_str}.xlsx
-                    if existing_file.name.endswith(f'_{date_str}.xlsx'):
+                    # 같은 날짜 패턴의 사양서 파일만 삭제 (엔드포인트/분석서/이관산출물/ksign 리포트 제외)
+                    if existing_file.name.endswith(f'_{date_str}.xlsx') and ' - ' not in existing_file.name:
                         try:
                             existing_file.unlink()
                             logger.debug(f"기존 오늘 날짜 spec 파일 제거: {existing_file.name}")
