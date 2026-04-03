@@ -31,7 +31,7 @@ class AnyframeJDBCSQLExtractor(SQLExtractor):
         config: Configuration,
         xml_parser: XMLMapperParser = None,
         java_parse_results: List[dict] = None,
-        call_graph_builder=None,
+        call_graph_builder = None,
     ):
         """
         AnyframeJDBCSQLExtractor 초기화
@@ -42,12 +42,7 @@ class AnyframeJDBCSQLExtractor(SQLExtractor):
             java_parse_results: Java 파싱 결과 리스트
             call_graph_builder: CallGraphBuilder 인스턴스 (선택적)
         """
-        super().__init__(
-            config=config,
-            xml_parser=xml_parser,
-            java_parse_results=java_parse_results,
-            call_graph_builder=call_graph_builder,
-        )
+        super().__init__(config=config, xml_parser=xml_parser, java_parse_results=java_parse_results, call_graph_builder=call_graph_builder)
         self.logger = logging.getLogger(__name__)
 
         # class_info_map 가져오기
@@ -82,7 +77,9 @@ class AnyframeJDBCSQLExtractor(SQLExtractor):
             return self.extract_sqls(filtered_files)
 
     @override
-    def extract_sqls(self, source_files: List[SourceFile]) -> List[SQLExtractionOutput]:
+    def extract_sqls(
+        self, source_files: List[SourceFile]
+    ) -> List[SQLExtractionOutput]:
         """
         Anyframe JDBC 전략: Java 파일에서 Anyframe JDBC SQL 추출
 
@@ -95,13 +92,15 @@ class AnyframeJDBCSQLExtractor(SQLExtractor):
         from models.sql_extraction_output import ExtractedSQLQuery
 
         results = []
+        idx = 1
 
         for java_file in source_files:
             try:
+                self.logger.debug(f"SQL파일 처리중.....({idx}/{len(source_files)})")
+                self.logger.debug(f"--> 파일 경로..... ({java_file.path})")
+                idx += 1
                 # Anyframe JDBC SQL 추출
-                sql_queries_data = self._extract_anyframe_jdbc_sql_from_file(
-                    java_file.path
-                )
+                sql_queries_data = self._extract_anyframe_jdbc_sql_from_file(java_file.path)
 
                 if sql_queries_data:
                     # strategy_specific에 Anyframe JDBC 특정 정보 저장
@@ -120,10 +119,10 @@ class AnyframeJDBCSQLExtractor(SQLExtractor):
                         SQLExtractionOutput(file=java_file, sql_queries=sql_queries)
                     )
 
+                    self.logger.debug(f"--> 추출된 SQL 쿼리 수: {len(sql_queries)}")
+
             except Exception as e:
-                self.logger.warning(
-                    f"Anyframe JDBC SQL 추출 실패: {java_file.path} - {e}"
-                )
+                self.logger.warning(f"Anyframe JDBC SQL 추출 실패: {java_file.path} - {e}")
 
         return results
 
@@ -145,7 +144,7 @@ class AnyframeJDBCSQLExtractor(SQLExtractor):
         file_path_str = str(file_path)
         classes_info = None
 
-        for parse_result in self.java_parse_results or []:
+        for parse_result in (self.java_parse_results or []):
             result_file = parse_result.get("file", {})
             result_file_path = result_file.get("path", "")
 
@@ -155,9 +154,7 @@ class AnyframeJDBCSQLExtractor(SQLExtractor):
                 break
 
         if not classes_info:
-            self.logger.warning(
-                f"java_parse_results에서 클래스 정보를 찾을 수 없습니다: {file_path}"
-            )
+            self.logger.warning(f"java_parse_results에서 클래스 정보를 찾을 수 없습니다: {file_path}")
             return sql_queries
 
         # 파일 읽기 (메서드 body 추출을 위해 필요)
@@ -232,8 +229,9 @@ class AnyframeJDBCSQLExtractor(SQLExtractor):
                 # method body 내에서 대소문자 구분 없이 SQL을 포함하는 StringBuilder 변수 찾기
                 # StringBuilder 변수 선언 패턴 (대소문자 구분 없음)
                 # 변수명에 "sql"이 포함된 경우만 찾기
-                # 괄호 안에 인자가 있어도 매칭 (예: new StringBuilder(), new StringBuilder(856))
-                stringbuilder_pattern = r'(?i)StringBuilder\s+(\w*[Ss][Qq][Ll]\w*)\s*=\s*new\s+StringBuilder\s*\([^)]*\)'
+                # StringBuilder(5925) 와 StringBuilder() 둘 다 찾음
+                # StringBuilder_pattern = r'(?i)StringBuilder\s+(\w*[Ss][Qq][Ll]\w*)\s*=\s*new\s+StringBuilder\s*\(\s*(\d*)?\s*\)'
+                stringbuilder_pattern = r'(?i)StringBuilder\s+(\w*[Ss][Qq][Ll]\w*)\s*=\s*new\s+StringBuilder\s*\(\s*(?P<arg>\d+)?\s*\)' 
                 sb_matches = re.finditer(stringbuilder_pattern, method_body)
 
                 for sb_match in sb_matches:
@@ -241,33 +239,35 @@ class AnyframeJDBCSQLExtractor(SQLExtractor):
 
                     # 해당 변수의 append 호출들 찾기 (대소문자 구분 없음)
                     # <var_name>.append("...") 또는 <var_name>.append('...')
-                    append_pattern = rf'(?i){re.escape(var_name)}\s*\.\s*append\s*\(\s*["\']([^"\']*)["\']'
+                    # 개선: 큰따옴표와 작은따옴표를 명시적으로 분리하여 내부 인용부호 처리
+                    # 이전 패턴의 문제: [^"￦']*는 " 또는 '가 아닌 문자만 매칭하므로,
+                    # 문자열 내부에 다른 종류의 인용부호가 있으면 그 지점에서 중단됨
+                    # append_pattern = rf'(?i){re.escape(var_name)}\s*\.\s*append\s*\(\s*["\']([^"\']*)["\']'
+                    append_pattern = (
+                        rf'(?i){re.escape(var_name)}\s*\.\s*append\s*\(\s*'
+                        r'"([^"]*)"|'   # 큰따옴표로 감싸인 문자열
+                        r"'([^']*)'"    # 작은따옴표로 감싸인 문자열
+                    )
                     append_matches = re.finditer(append_pattern, method_body, re.DOTALL)
 
                     # SQL 조각 수집
                     sql_parts = []
                     for append_match in append_matches:
-                        sql_part = append_match.group(1)
+                        sql_part = append_match.group(1) or append_match.group(2) 
                         # 이스케이프된 문자 처리 (\n, \t 등)
-                        sql_part = (
-                            sql_part.replace("\\n", "\n")
-                            .replace("\\t", "\t")
-                            .replace("\\r", "\r")
-                        )
+                        sql_part = sql_part.replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r")
                         sql_parts.append(sql_part)
 
                     if sql_parts:
                         # StringBuilder의 toString() 호출 위치 찾기 (대소문자 구분 없음)
                         # <var_name>.toString()
-                        tostring_pattern = (
-                            rf"(?i){re.escape(var_name)}\s*\.\s*toString\s*\("
-                        )
+                        tostring_pattern = rf"(?i){re.escape(var_name)}\s*\.\s*toString\s*\("
                         tostring_match = re.search(tostring_pattern, method_body)
 
                         if tostring_match:
                             # toString() 호출 이후의 코드에서 메서드 호출 확인
                             # queryForObject, queryForList, update 등의 메서드 호출 찾기
-                            after_tostring = method_body[tostring_match.end() :]
+                            after_tostring = method_body[tostring_match.end():]
 
                             # SQL 조합
                             combined_sql = "".join(sql_parts).strip()
@@ -285,22 +285,13 @@ class AnyframeJDBCSQLExtractor(SQLExtractor):
                                     param_type = param.get("type", "")
                                     if param_type:
                                         # 제네릭 타입 처리 (예: List<AdBkgImgDVO> -> AdBkgImgDVO)
-                                        param_type = self._extract_generic_inner_type(
-                                            param_type
-                                        )
+                                        param_type = self._extract_generic_inner_type(param_type)
 
                                         # self.class_info_map에서 찾기
-                                        if (
-                                            param_type
-                                            and param_type in self.class_info_map
-                                        ):
-                                            class_infos = self.class_info_map[
-                                                param_type
-                                            ]
+                                        if param_type and param_type in self.class_info_map:
+                                            class_infos = self.class_info_map[param_type]
                                             if class_infos:
-                                                parameter_type = class_infos[0].get(
-                                                    "full_class_name"
-                                                )
+                                                parameter_type = class_infos[0].get("full_class_name")
                                                 break
 
                                 # result_type: method_info.return_type 값을 가져와서 (제네릭 타입인 경우 내부 type을 꺼내야 함) self.class_info_map에서 full_class_name 찾기
@@ -308,20 +299,13 @@ class AnyframeJDBCSQLExtractor(SQLExtractor):
                                 return_type = method_info.get("return_type", "")
                                 if return_type:
                                     # 제네릭 타입 처리 (예: List<AdBkgImgDVO> -> AdBkgImgDVO)
-                                    return_type = self._extract_generic_inner_type(
-                                        return_type
-                                    )
+                                    return_type = self._extract_generic_inner_type(return_type)
 
                                     # self.class_info_map에서 찾기
-                                    if (
-                                        return_type
-                                        and return_type in self.class_info_map
-                                    ):
+                                    if return_type and return_type in self.class_info_map:
                                         class_infos = self.class_info_map[return_type]
                                         if class_infos:
-                                            result_type = class_infos[0].get(
-                                                "full_class_name"
-                                            )
+                                            result_type = class_infos[0].get("full_class_name")
 
                                 sql_queries.append(
                                     {
@@ -363,7 +347,9 @@ class AnyframeJDBCSQLExtractor(SQLExtractor):
 
     @override
     def get_class_files_from_sql_query(
-        self, sql_query: Dict[str, Any]
+        self, 
+        sql_query: Dict[str, Any],
+        file_path: Optional[Path] = None,
     ) -> Tuple[Optional[str], Dict[str, Set[str]], Set[str]]:
         """
         SQL 쿼리에서 관련 클래스 파일 목록 추출

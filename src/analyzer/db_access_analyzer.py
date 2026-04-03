@@ -79,12 +79,12 @@ class DBAccessAnalyzer:
                     columns_set.add(col_name)
                     column_info_dict[col_name] = {"new_column": False}
                 else:
-                    # 객체 형식: ColumnDetail(name="column_name", new_column=True, column_type="name", encryption_code="P017")
+                    # 객체 형식: ColumnDetail(name="column_name", new_column=False, column_type="name", encryption_code="P017")
                     col_name = col.name.lower()
                     if col_name:
                         columns_set.add(col_name)
-                        col_detail = {"new_column": col.new_column}
-                        # column_type과 encryption_code가 있으면 포함
+                        # col_detail = {"new_column": col.new_column} 
+                        col_detail = {}
                         if col.column_type:
                             col_detail["column_type"] = col.column_type
                         if col.encryption_code:
@@ -131,15 +131,25 @@ class DBAccessAnalyzer:
                 continue
 
             # 테이블별 접근 정보 수집
-            table_info = self._analyze_table_access(table_name, columns, source_files)
+            table_info = self._analyze_table_access(
+                table_name, 
+                columns, 
+                source_files
+            )
 
             if table_info:
+                print(table_info.table_name)
+                print(len(table_info.access_files))
+                print("="*30)
                 table_access_info_list.append(table_info)
 
         return table_access_info_list
 
     def _analyze_table_access(
-        self, table_name: str, columns: Set[str], source_files: List[SourceFile]
+        self, 
+        table_name: str, 
+        columns: Set[str], 
+        source_files: List[SourceFile]
     ) -> Optional[TableAccessInfo]:
         """
         특정 테이블에 대한 접근 정보 분석
@@ -189,8 +199,9 @@ class DBAccessAnalyzer:
                 sql_queries.append(enriched_query)
 
                 # sql query에서 사용되는 클래스 파일 경로 정보 추출 (sql_wrapping_type에 따라 다름 )
-                method_string, query_layer_files, query_added_files = (
-                    self.sql_extractor.get_class_files_from_sql_query(sql_query_info)
+                method_string, query_layer_files, query_added_files = self.sql_extractor.get_class_files_from_sql_query(
+                    sql_query=sql_query_info,
+                    file_path=file_path,
                 )
 
                 if query_layer_files:
@@ -206,22 +217,14 @@ class DBAccessAnalyzer:
                     and self.call_graph_builder.call_graph
                 ):
                     # Call Graph에서 역방향으로 탐색하여 상위 layer 파일 찾기
-                    upper_layer_files, reduced_call_stacks = (
-                        self._find_upper_layer_files(method_string)
-                    )
+                    upper_layer_files, reduced_call_stacks = self._find_upper_layer_files(method_string)                    
                     for layer, layer_file_path in upper_layer_files:
-                        if (
-                            layer
-                            and layer_file_path
-                            and layer_file_path not in all_added_files
-                        ):
+                        if layer and layer_file_path and layer_file_path not in all_added_files:
                             layer_files[layer].add(layer_file_path)
                             all_added_files.add(layer_file_path)
 
                     # call_stacks 생성 (endpoint에서 target까지의 경로)
-                    call_stacks = self._expand_call_stacks(
-                        reduced_call_stacks, method_string
-                    )
+                    call_stacks = self._expand_call_stacks(reduced_call_stacks, method_string)
                     enriched_query["call_stacks"] = call_stacks
 
         # TableAccessInfo 생성
@@ -246,11 +249,11 @@ class DBAccessAnalyzer:
         for col_name, col_info in sorted(column_info_dict.items()):
             col_entry = {
                 "name": col_name,
-                "new_column": col_info.get("new_column", False),
+                "column_type": col_info.get("column_type"),
+                # "encryption_code": col_info.get("encryption_code"),
             }
-            # column_type과 encryption_code가 있으면 포함
-            if "column_type" in col_info:
-                col_entry["column_type"] = col_info["column_type"]
+            # if "column_tpe" in col_info:
+            #  col_entry["column_type"] = col_info["column_type"]
             if "encryption_code" in col_info:
                 col_entry["encryption_code"] = col_info["encryption_code"]
             columns_list.append(col_entry)
@@ -330,34 +333,31 @@ class DBAccessAnalyzer:
         """
         matching_queries = []
 
-        # TODO: 김한섭 부장님 수정한 코드 확인할 것.
-
         for sql_query_info in sql_queries:
+            sql_id = sql_query_info.get("sql_id", "")
             sql = sql_query_info.get("sql", "")
             if not sql:
                 continue
 
             # 테이블명 확인
-            tables = self.sql_extractor.extract_table_names(sql)
+            tables = self.sql_extractor.extract_table_names(sql, table_name )
             if table_name.lower() not in {t.lower() for t in tables}:
                 continue
 
             # SQL에서 칼럼 추출
-            sql_columns = self.sql_extractor.extract_column_names(sql, table_name)
+            sql_columns = self.sql_extractor.extract_column_names(sql, table_name, false_columns, sql_id)
 
             # sql_columns가 비어있고 SELECT * FROM 패턴인 경우 false_columns로 설정
             if not sql_columns:
                 # SELECT ~ FROM 패턴 확인 (대소문자 무시, 여러 줄 지원)
                 select_from_pattern = r"SELECT\s+(.*?)\s+FROM\s+"
-                select_match = re.search(
-                    select_from_pattern, sql, re.IGNORECASE | re.DOTALL
-                )
+                select_match = re.search(select_from_pattern, sql, re.IGNORECASE | re.DOTALL)
                 if select_match:
                     select_clause = select_match.group(1).strip()
                     # SELECT와 FROM 사이에 *가 포함되어 있는지 확인
                     if "*" in select_clause:
                         # FROM 다음 부분 확인 (서브쿼리가 아닌지)
-                        from_after = sql[select_match.end() :].strip()
+                        from_after = sql[select_match.end():].strip()
                         # FROM 다음이 (로 시작하지 않으면
                         if not from_after.startswith("("):
                             sql_columns = false_columns.copy()
@@ -377,9 +377,7 @@ class DBAccessAnalyzer:
 
         return matching_queries
 
-    def _find_upper_layer_files(
-        self, method_string: str
-    ) -> tuple[List[tuple[str, str]], List[str]]:
+    def _find_upper_layer_files(self, method_string: str) -> tuple[List[tuple[str, str]], List[str]]:
         """
         Call Graph에서 method string과 일치하는 부분을 찾아 root까지 상위 layer로 거슬러 올라가면서
         layer 이름과 file_path가 모두 존재하는 경우를 수집하고, call_stacks도 수집
@@ -468,9 +466,7 @@ class DBAccessAnalyzer:
             return []
 
         call_graph = self.call_graph_builder.call_graph
-        endpoint_method_signatures = (
-            self.call_graph_builder.get_endpoint_method_signatures()
-        )
+        endpoint_method_signatures = self.call_graph_builder.get_endpoint_method_signatures()
 
         all_call_stacks: List[List[str]] = []
 

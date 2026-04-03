@@ -7,7 +7,7 @@ MyBatis XML Mapper 파일에서 SQL을 추출하는 구현 클래스입니다.
 import logging
 import re
 from pathlib import Path
-from collections import defaultdict
+from collections import defaultdict 
 from typing import Any, Dict, List, Optional, Set, Tuple, override
 
 from config.config_manager import Configuration
@@ -15,11 +15,11 @@ from models.source_file import SourceFile
 from models.sql_extraction_output import SQLExtractionOutput
 from parser.xml_mapper_parser import XMLMapperParser
 
-from ..llm_sql_extractor.llm_sql_extractor import LLMSQLExtractor
+from ..llm_sql_extractors.llm_sql_extractor import LLMSQLExtractor
 from ..sql_extractor import SQLExtractor
 
 
-class MyBatisSQLExtractor(SQLExtractor):
+class MyBatisPointcoreSQLExtractor(SQLExtractor):
     """
     MyBatis SQL Extractor 구현 클래스
 
@@ -43,7 +43,12 @@ class MyBatisSQLExtractor(SQLExtractor):
             java_parse_results: Java 파싱 결과 리스트 (사용하지 않지만 호환성을 위해 유지)
             call_graph_builder: CallGraphBuilder 인스턴스 (선택적)
         """
-        super().__init__(config=config, xml_parser=xml_parser, java_parse_results=java_parse_results, call_graph_builder=call_graph_builder)
+        super().__init__(
+            config=config, 
+            xml_parser=xml_parser, 
+            java_parse_results=java_parse_results, 
+            call_graph_builder=call_graph_builder
+        )
         self.logger = logging.getLogger(__name__)
 
     def get_layer_name(self) -> str:
@@ -54,7 +59,7 @@ class MyBatisSQLExtractor(SQLExtractor):
             str: 레이어명 (기본값: "repository")
         """
         return "repository"
-
+    
     @override
     def extract_from_files(
         self, source_files: List[SourceFile]
@@ -82,7 +87,7 @@ class MyBatisSQLExtractor(SQLExtractor):
         else:
             # 기존 방식 사용 (이미 필터링된 파일 목록 사용)
             return self.extract_sqls(filtered_files)
-
+        
     @override
     def extract_sqls(
         self, source_files: List[SourceFile]
@@ -120,18 +125,19 @@ class MyBatisSQLExtractor(SQLExtractor):
                         "parameter_type": parameter_type,
                         "result_type": result_type,
                         "result_map": result_map,
-                        # resultMap 내부 필드 매핑 (SELECT용)
-                        "result_field_mappings": query.get("result_field_mappings", []),
-                        # SQL 내 #{fieldName} 패턴 (INSERT/UPDATE용)
-                        "parameter_field_mappings": query.get("parameter_field_mappings", []),
-                        "xml_file_path": xml_file.path,
                     }
+
+                    original_sql = query.get("sql", "")
+                    resolved_sql = extract_resolved_sql(
+                        xml_path=str(xml_file.path),
+                        sql_id=query.get("id")
+                    ) if xml_file.path and qeury.get("id", None) else None
 
                     sql_queries.append(
                         ExtractedSQLQuery(
                             id=query.get("id", ""),
                             query_type=query.get("query_type", "SELECT"),
-                            sql=query.get("sql", ""),
+                            sql=resolved_sql if resolved_sql else original_sql,
                             strategy_specific=strategy_specific,
                         )
                     )
@@ -187,11 +193,12 @@ class MyBatisSQLExtractor(SQLExtractor):
         all_files: Set[str] = set()
 
         layer_name = self.get_layer_name()
-
+   
         strategy_specific = sql_query.get("strategy_specific", {})
         
         # MyBatis: namespace, parameter_type, result_type, result_map 사용
         namespace = strategy_specific.get("namespace", "")
+
         if namespace:
             interface_file = self._find_class_file(namespace)
             if interface_file:
@@ -219,22 +226,22 @@ class MyBatisSQLExtractor(SQLExtractor):
                 layer_files[layer_name].add(result_map_file)
                 all_files.add(result_map_file)
 
-        xml_file_path = strategy_specific.get("xml_file_path")
-        if xml_file_path:
-            layer_files["xml"].add(xml_file_path)
-            all_files.add(xml_file_path)
 
         # method_string 생성: namespace의 class_name + sql query의 id
         method_string = None
         query_id = sql_query.get("id", "")
         if namespace and query_id:
+            #query_i가가 다음과 같은 경우를 모두 포함
+            # sli-ccs-cp-scrpt-dqm-CPSrvclScrptBasDQM-listSrvclScrptBas
+            # listSrcclScrptBas
+            # 결과 listSrvclScrptBas가 method_name이 되도록 함.
+
             # namespace에서 마지막 클래스명 추출
             class_name = namespace.split(".")[-1]
-            
-            #query_id에서 마지막 메서드명 추출
-            method_name = query_id.split(".")[-1]
 
+            # query_id에서 마지막 메서드명 추출
+            method_name = query_id.split("-")[-1]
+            
             method_string = f"{class_name}.{method_name}"
 
         return method_string, layer_files, all_files
-

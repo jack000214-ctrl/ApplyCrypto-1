@@ -202,7 +202,9 @@ class BatchBaseSQLExtractor(SQLExtractor):
         return sql_queries
 
     def get_class_files_from_sql_query(
-        self, sql_query: Dict[str, Any]
+        self,
+          sql_query: Dict[str, Any],
+          file_path: Optional[Path] = None,
     ) -> Tuple[Optional[str], Dict[str, Set[str]], Set[str]]:
         """
         SQL 쿼리에서 관련 Java 배치 파일 목록 추출

@@ -49,6 +49,16 @@ class SQLExtractorFactory:
                 call_graph_builder=call_graph_builder,
             )
         
+        elif sql_wrapping_type == "mybatis_wm":
+            from .sql_extractors.mybatis_sql_extractor import MyBatisSQLExtractor
+
+            return MyBatisSQLExtractor(
+                config=config,
+                xml_parser=xml_parser,
+                java_parse_results=java_parse_results,
+                call_graph_builder=call_graph_builder,
+            )
+        
         elif sql_wrapping_type == "mybatis_direct":
             from .sql_extractors.mybatis_direct_sql_extractor import MyBatisDirectSQLExtractor
 
@@ -69,11 +79,48 @@ class SQLExtractorFactory:
                 call_graph_builder=call_graph_builder,
             )
 
+        if sql_wrapping_type == "mybatis_pointcore":
+            from .sql_extractors.mybatis_pointcore_sql_extractor import MybatisPointcoreSQLExtractor
 
-        elif sql_wrapping_type == "mybatis_ccs":
-            from .sql_extractors.mybatis_ccs_sql_extractor import MybatisCCSSQLExtractor
+            return MybatisPointcoreSQLExtractor(
+                config=config,
+                xml_parser=xml_parser,
+                java_parse_results=java_parse_results,
+                call_graph_builder=call_graph_builder,
+            )
+        
+        elif "mybatis" in sql_wrapping_type and ("SpringMVC" in config.framework_type or "endpoint" in sql_wrapping_type):
+            from .sql_extractors.mybatis_sql_extractor import MybatisSQLExtractor
+
+            return MybatisSQLExtractor(
+                config=config,
+                xml_parser=xml_parser,
+                java_parse_results=java_parse_results,
+                call_graph_builder=call_graph_builder,
+            )
+
+        elif sql_wrapping_type == "ccs":
+            from .sql_extractors.ccs_sql_extractor import MybatisCCSSQLExtractor
 
             return MybatisCCSSQLExtractor(
+                config=config,
+                xml_parser=xml_parser,
+                java_parse_results=java_parse_results,
+                call_graph_builder=call_graph_builder,
+            )
+        elif sql_wrapping_type == "mybatis_revolution_bat":
+            from .sql_extractors.mybatis_revolution_bat_sql_extractor import MybatisRevolutionBatSQLExtractor
+
+            return MybatisRevolutionBatSQLExtractor(
+                config=config,
+                xml_parser=xml_parser,
+                java_parse_results=java_parse_results,
+                call_graph_builder=call_graph_builder,
+            )
+        elif sql_wrapping_type == "mybatis_drt":
+            from .sql_extractors.mybatis_drt_sql_extractor import MybatisDrtSQLExtractor
+
+            return MybatisDrtSQLExtractor(
                 config=config,
                 xml_parser=xml_parser,
                 java_parse_results=java_parse_results,
@@ -116,12 +163,21 @@ class SQLExtractorFactory:
                 call_graph_builder=call_graph_builder,
             )
 
+        elif sql_wrapping_type == "jdbc_sarangon":
+            from .sql_extractors.anyframe_jdbc_sql_extractor import (
+                AnyframeJDBCSQLExtractor,
+            )
+
+            return AnyframeJDBCSQLExtractor(
+                config=config,
+                xml_parser=xml_parser,
+                java_parse_results=java_parse_results,
+                call_graph_builder=call_graph_builder,
+            )
+
         elif sql_wrapping_type == "jdbc":
             if "BatBanka" in config.framework_type:
-                from .sql_extractors.anyframe_jdbc_bat_sql_extractor import (
-                    AnyframeJDBCBatSqlExtractor,
-                )
-
+                from .sql_extractors.anyframe_jdbc_bat_sql_extractor import AnyframeJDBCBatSqlExtractor
                 return AnyframeJDBCBatSqlExtractor(
                     config=config,
                     xml_parser=xml_parser,
@@ -129,10 +185,7 @@ class SQLExtractorFactory:
                     call_graph_builder=call_graph_builder,
                 )
             elif "Anyframe" in config.framework_type:
-                from .sql_extractors.anyframe_jdbc_sql_extractor import (
-                    AnyframeJDBCSQLExtractor,
-                )
-
+                from .sql_extractors.anyframe_jdbc_sql_extractor import AnyframeJDBCSQLExtractor
                 return AnyframeJDBCSQLExtractor(
                     config=config,
                     xml_parser=xml_parser,

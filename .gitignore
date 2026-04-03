@@ -88,3 +88,4 @@ src/modifier/code_generator/**/*template*.md
 
 deploy/
 config*.json
+*.md

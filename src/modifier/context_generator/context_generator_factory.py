@@ -8,7 +8,6 @@ class ContextGeneratorFactory:
     """
 
     @staticmethod
-    Explain | Document | Unit Test
     def create(
         config: Configuration, code_generator: BaseCodeGenerator
     ) -> BaseContextGenerator:

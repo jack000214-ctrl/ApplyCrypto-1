@@ -7,7 +7,7 @@ MyBatis XML Mapper 파일에서 SQL을 추출하는 구현 클래스입니다.
 import logging
 import re
 from pathlib import Path
-from collections import defaultdict
+from collections import defaultdict 
 from typing import Any, Dict, List, Optional, Set, Tuple, override
 
 from config.config_manager import Configuration
@@ -15,11 +15,11 @@ from models.source_file import SourceFile
 from models.sql_extraction_output import SQLExtractionOutput
 from parser.xml_mapper_parser import XMLMapperParser
 
-from ..llm_sql_extractor.llm_sql_extractor import LLMSQLExtractor
+from ..llm_sql_extractors.llm_sql_extractor import LLMSQLExtractor
 from ..sql_extractor import SQLExtractor
 
 
-class MyBatisSQLExtractor(SQLExtractor):
+class MyBatisRevolutionBatSQLExtractor(SQLExtractor):
     """
     MyBatis SQL Extractor 구현 클래스
 
@@ -54,7 +54,7 @@ class MyBatisSQLExtractor(SQLExtractor):
             str: 레이어명 (기본값: "repository")
         """
         return "repository"
-
+    
     @override
     def extract_from_files(
         self, source_files: List[SourceFile]
@@ -82,7 +82,7 @@ class MyBatisSQLExtractor(SQLExtractor):
         else:
             # 기존 방식 사용 (이미 필터링된 파일 목록 사용)
             return self.extract_sqls(filtered_files)
-
+        
     @override
     def extract_sqls(
         self, source_files: List[SourceFile]
@@ -187,11 +187,17 @@ class MyBatisSQLExtractor(SQLExtractor):
         all_files: Set[str] = set()
 
         layer_name = self.get_layer_name()
-
+   
         strategy_specific = sql_query.get("strategy_specific", {})
         
         # MyBatis: namespace, parameter_type, result_type, result_map 사용
+
+        # PointCore 임시 조치 - namespace의 마지막 세글자 "Sql"을 "Dao"로 대치.
+        # 근본적으로는 sql.xml과 dao.java 파일간의 더 신뢰 가능 매칭룰을 찾아서 적용해야 함.
         namespace = strategy_specific.get("namespace", "")
+        if namespace and namespace.endswith("Sql"):
+            namespace = namespace[:-3] + "Dao"
+
         if namespace:
             interface_file = self._find_class_file(namespace)
             if interface_file:
@@ -228,13 +234,18 @@ class MyBatisSQLExtractor(SQLExtractor):
         method_string = None
         query_id = sql_query.get("id", "")
         if namespace and query_id:
-            # namespace에서 마지막 클래스명 추출
-            class_name = namespace.split(".")[-1]
-            
-            #query_id에서 마지막 메서드명 추출
-            method_name = query_id.split(".")[-1]
+            #query_i가가 다음과 같은 경우를 모두 포함
+            # sli-ccs-cp-scrpt-dqm-CPSrvclScrptBasDQM-listSrvclScrptBas
+            # listSrcclScrptBas
+            # 결과 listSrvclScrptBas가 method_name이 되도록 함.
 
+            # namespace에서 마지막 클래스명 추출
+            # pointcore의 경우 namespace가 class명으로 대치했음
+            class_name = namespace
+
+            # query_id에서 마지막 메서드명 추출
+            method_name = query_id.split("-")[-1]
+            
             method_string = f"{class_name}.{method_name}"
 
         return method_string, layer_files, all_files
-

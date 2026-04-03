@@ -252,7 +252,9 @@ class JDBCSQLExtractor(SQLExtractor):
 
     @override
     def get_class_files_from_sql_query(
-        self, sql_query: Dict[str, Any]
+        self, 
+        sql_query: Dict[str, Any],
+        file_path: Optional[Path] = None,
     ) -> Tuple[Optional[str], Dict[str, Set[str]], Set[str]]:
         """
         SQL 쿼리에서 관련 클래스 파일 목록 추출

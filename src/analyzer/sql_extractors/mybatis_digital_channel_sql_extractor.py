@@ -7,6 +7,7 @@ MyBatis XML Mapper 파일에서 SQL을 추출하는 구현 클래스입니다.
 import logging
 import os
 import json
+from pathlib import Path
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Set, Tuple, override
 
@@ -78,7 +79,9 @@ class MyBatisDigitalChannelSQLExtractor(MyBatisSQLExtractor):
 
     @override
     def get_class_files_from_sql_query(
-        self, sql_query: Dict[str, Any]
+        self, 
+        sql_query: Dict[str, Any],
+        file_path: Optional[str] = None,
     ) -> Tuple[Optional[str], Dict[str, Set[str]], Set[str]]:
         """
         SQL 쿼리에서 관련 클래스 파일 목록 추출

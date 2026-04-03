@@ -6,6 +6,7 @@ sql_wrapping_type에 따라 서로 다른 방식으로 SQL을 추출하는 기�
 
 import logging
 import re
+from pathlib import Path
 from abc import ABC, abstractmethod
 from parser.xml_mapper_parser import XMLMapperParser
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -96,7 +97,9 @@ class SQLExtractor(ABC):
 
     @abstractmethod
     def get_class_files_from_sql_query(
-        self, sql_query: Dict[str, Any]
+        self, 
+        sql_query: Dict[str, Any],
+        file_path: Optional[path] = None,
     ) -> Tuple[Optional[str], Dict[str, Set[str]], Set[str]]:
         """
         SQL 쿼리에서 관련 클래스 파일 목록 추출 (추상 메서드)
@@ -112,7 +115,7 @@ class SQLExtractor(ABC):
         """
         pass
 
-    def extract_table_names(self, sql: str) -> Set[str]:
+    def extract_table_names(self, sql: str, table_name: str) -> Set[str]:
         """
         SQL 쿼리에서 테이블명 추출 (공통 메서드)
 
@@ -123,54 +126,112 @@ class SQLExtractor(ABC):
             Set[str]: 추출된 테이블명 집합
         """
         tables = set()
+        isUsed = False
 
-        # FROM 절에서 테이블명 추출
-        from_pattern = (
-            r"\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\b"
-        )
-        from_matches = re.findall(from_pattern, sql, re.IGNORECASE)
-        for match in from_matches:
-            # 스키마명 제거 (예: schema.table -> table)
-            table = match.split(".")[-1]
-            tables.add(table.upper())
-
-        # JOIN 절에서 테이블명 추출
-        join_pattern = r"\b(?:INNER|LEFT|RIGHT|FULL|OUTER)?\s+JOIN\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\b"
-        join_matches = re.findall(join_pattern, sql, re.IGNORECASE)
-        for match in join_matches:
-            table = match.split(".")[-1]
-            tables.add(table.upper())
-
-        # INSERT INTO 절에서 테이블명 추출
-        insert_pattern = (
-            r"\bINSERT\s+INTO\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\b"
-        )
-        insert_matches = re.findall(insert_pattern, sql, re.IGNORECASE)
-        for match in insert_matches:
-            table = match.split(".")[-1]
-            tables.add(table.upper())
-
-        # UPDATE 절에서 테이블명 추출
-        update_pattern = (
-            r"\bUPDATE\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\b"
-        )
-        update_matches = re.findall(update_pattern, sql, re.IGNORECASE)
-        for match in update_matches:
-            table = match.split(".")[-1]
-            tables.add(table.upper())
-
-        # DELETE FROM 절에서 테이블명 추출
-        delete_pattern = (
-            r"\bDELETE\s+FROM\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\b"
-        )
-        delete_matches = re.findall(delete_pattern, sql, re.IGNORECASE)
-        for match in delete_matches:
-            table = match.split(".")[-1]
-            tables.add(table.upper())
+        if self.is_table_used(sql, table_name):
+            table.add(table_name.upper())
+            # print(f"tables 추가>>> {table_name}")
 
         return tables
+        
+        # FROM 절에서 테이블명 추출
+        # from_pattern = (
+        #     r"\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\b"
+        # )
+        # from_matches = re.findall(from_pattern, sql, re.IGNORECASE)
+        # for match in from_matches:
+        #     # 스키마명 제거 (예: schema.table -> table)
+        #     table = match.split(".")[-1]
+        #     tables.add(table.upper())
 
-    def extract_column_names(self, sql: str, table_name: str) -> Set[str]:
+        # # JOIN 절에서 테이블명 추출
+        # join_pattern = r"\b(?:INNER|LEFT|RIGHT|FULL|OUTER)?\s+JOIN\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\b"
+        # join_matches = re.findall(join_pattern, sql, re.IGNORECASE)
+        # for match in join_matches:
+        #     table = match.split(".")[-1]
+        #     tables.add(table.upper())
+
+        # # INSERT INTO 절에서 테이블명 추출
+        # insert_pattern = (
+        #     r"\bINSERT\s+INTO\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\b"
+        # )
+        # insert_matches = re.findall(insert_pattern, sql, re.IGNORECASE)
+        # for match in insert_matches:
+        #     table = match.split(".")[-1]
+        #     tables.add(table.upper())
+
+        # # UPDATE 절에서 테이블명 추출
+        # update_pattern = (
+        #     r"\bUPDATE\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\b"
+        # )
+        # update_matches = re.findall(update_pattern, sql, re.IGNORECASE)
+        # for match in update_matches:
+        #     table = match.split(".")[-1]
+        #     tables.add(table.upper())
+
+        # # DELETE FROM 절에서 테이블명 추출
+        # delete_pattern = (
+        #     r"\bDELETE\s+FROM\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\b"
+        # )
+        # delete_matches = re.findall(delete_pattern, sql, re.IGNORECASE)
+        # for match in delete_matches:
+        #     table = match.split(".")[-1]
+        #     tables.add(table.upper())
+
+        # return tables
+
+    def is_table_used(self, sql: str, table_name: str) -> bool:
+        """
+        SQL 쿼리에서 특정 테이블이 사용되는지 여부 확인 (공통 메서드)
+
+        Args:
+            sql: SQL 쿼리 문자열
+            table_name: 테이블명
+
+        Returns:
+            bool: 테이블이 사용되는지 여부
+        """
+        if not sql_query or not table_name:
+            return False
+        
+        table_name = re.escape(table_name) 
+        
+        if re.search(rf"\b{table_name}\b", sql_query, re.IGNORECASE):
+            return True
+        
+        join_pattern2 = re.compile = (rf'\bJOIN\s+{table_name}\b', re.IGNORECASE)
+        if join_pattern2.search(sql_query):
+            return True
+        
+        return False
+     
+     def is_column_used(self, sql: str, column: str) -> bool:
+        """
+        SQL 쿼리에서 특정 칼럼이 사용되는지 여부 확인 (공통 메서드)
+
+        Args:
+            sql: SQL 쿼리 문자열
+            column_name: 칼럼명
+
+        Returns:
+            bool: 칼럼이 사용되는지 여부
+        """
+        if not sql_query or not column:
+            return False
+        
+        column = re.escape(column) 
+        
+        sql_query_filter = re.sub(r"('{[^']|'')*')", " ", sql_query)
+        from_pattern2 = re.compile(rf'\b[a-zA-Z0-9_]+\s*\.\s*{column}\b', re.IGNORECASE)
+        if from_pattern2.search(sql_query_filter):
+            return True
+        from_pattern3 = re.compile(rf'\b{column}\b', re.IGNORECASE)
+        if from_pattern3.search(sql_query_filter):
+            return True
+         
+        return False
+    
+    def extract_column_names(self, sql: str, table_name: str, false_columns: Set[str], sql_id: str) -> Set[str]:
         """
         SQL 쿼리에서 특정 테이블의 칼럼명 추출 (공통 메서드)
 
@@ -184,60 +245,67 @@ class SQLExtractor(ABC):
         columns = set()
         table_alias = None
 
-        # 테이블 별칭 찾기 (예: FROM users u -> u)
-        alias_pattern = (
-            rf"\bFROM\s+{re.escape(table_name)}\s+([a-zA-Z_][a-zA-Z0-9_]*)\b"
-        )
-        alias_match = re.search(alias_pattern, sql, re.IGNORECASE)
-        if alias_match:
-            table_alias = alias_match.group(1)
-
-        # SELECT 절에서 칼럼명 추출
-        select_pattern = r"\bSELECT\s+(.*?)\s+FROM\b"
-        select_match = re.search(select_pattern, sql, re.IGNORECASE | re.DOTALL)
-        if select_match:
-            select_clause = select_match.group(1)
-            # 각 칼럼 추출
-            column_pattern = r"([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)"
-            column_matches = re.findall(column_pattern, select_clause)
-            for match in column_matches:
-                if "." in match:
-                    # table.column 또는 alias.column 형식
-                    parts = match.split(".")
-                    if len(parts) == 2:
-                        if (
-                            parts[0].upper() == table_name.upper()
-                            or parts[0] == table_alias
-                        ):
-                            columns.add(parts[1].upper())
-                else:
-                    # 단순 칼럼명
-                    columns.add(match.upper())
-
-        # INSERT INTO 절에서 칼럼명 추출
-        insert_pattern = rf"\bINSERT\s+INTO\s+{re.escape(table_name)}\s*\(([^)]+)\)"
-        insert_match = re.search(insert_pattern, sql, re.IGNORECASE)
-        if insert_match:
-            column_list = insert_match.group(1)
-            for col in column_list.split(","):
-                col = col.strip()
-                if col:
-                    columns.add(col.upper())
-
-        # UPDATE SET 절에서 칼럼명 추출
-        update_pattern = (
-            rf"\bUPDATE\s+{re.escape(table_name)}\s+SET\s+(.*?)(?:\s+WHERE|\s*$)"
-        )
-        update_match = re.search(update_pattern, sql, re.IGNORECASE | re.DOTALL)
-        if update_match:
-            set_clause = update_match.group(1)
-            # column = value 형식 추출
-            set_column_pattern = r"([a-zA-Z_][a-zA-Z0-9_]*)\s*="
-            set_matches = re.findall(set_column_pattern, set_clause)
-            for match in set_matches:
-                columns.add(match.upper())
-
+        if self.is_table_used(sql, table_name):
+            for column in false_columns:
+                if self.is_column_used(sql, column):
+                    columns.add(column.upper())
+                    
         return columns
+
+        # # 테이블 별칭 찾기 (예: FROM users u -> u)
+        # alias_pattern = (
+        #     rf"\bFROM\s+{re.escape(table_name)}\s+([a-zA-Z_][a-zA-Z0-9_]*)\b"
+        # )
+        # alias_match = re.search(alias_pattern, sql, re.IGNORECASE)
+        # if alias_match:
+        #     table_alias = alias_match.group(1)
+
+        # # SELECT 절에서 칼럼명 추출
+        # select_pattern = r"\bSELECT\s+(.*?)\s+FROM\b"
+        # select_match = re.search(select_pattern, sql, re.IGNORECASE | re.DOTALL)
+        # if select_match:
+        #     select_clause = select_match.group(1)
+        #     # 각 칼럼 추출
+        #     column_pattern = r"([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)"
+        #     column_matches = re.findall(column_pattern, select_clause)
+        #     for match in column_matches:
+        #         if "." in match:
+        #             # table.column 또는 alias.column 형식
+        #             parts = match.split(".")
+        #             if len(parts) == 2:
+        #                 if (
+        #                     parts[0].upper() == table_name.upper()
+        #                     or parts[0] == table_alias
+        #                 ):
+        #                     columns.add(parts[1].upper())
+        #         else:
+        #             # 단순 칼럼명
+        #             columns.add(match.upper())
+
+        # # INSERT INTO 절에서 칼럼명 추출
+        # insert_pattern = rf"\bINSERT\s+INTO\s+{re.escape(table_name)}\s*\(([^)]+)\)"
+        # insert_match = re.search(insert_pattern, sql, re.IGNORECASE)
+        # if insert_match:
+        #     column_list = insert_match.group(1)
+        #     for col in column_list.split(","):
+        #         col = col.strip()
+        #         if col:
+        #             columns.add(col.upper())
+
+        # # UPDATE SET 절에서 칼럼명 추출
+        # update_pattern = (
+        #     rf"\bUPDATE\s+{re.escape(table_name)}\s+SET\s+(.*?)(?:\s+WHERE|\s*$)"
+        # )
+        # update_match = re.search(update_pattern, sql, re.IGNORECASE | re.DOTALL)
+        # if update_match:
+        #     set_clause = update_match.group(1)
+        #     # column = value 형식 추출
+        #     set_column_pattern = r"([a-zA-Z_][a-zA-Z0-9_]*)\s*="
+        #     set_matches = re.findall(set_column_pattern, set_clause)
+        #     for match in set_matches:
+        #         columns.add(match.upper())
+
+        # return columns
 
     def _remove_sql_comments(self, sql: str) -> str:
         """
