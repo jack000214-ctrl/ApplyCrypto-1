@@ -1,22 +1,23 @@
 """
-Anyframe RPS Context Generator
+SpringMVC WM Context Generator
 
-RPS 온라인 타입 전용 Context Generator입니다.
+WM 온라인 타입 전용 Context Generator입니다.
 
 주요 기능:
 1. generate(): call_stack 기반 파일 그룹핑
    - AnyframeContextGenerator(import-chasing)와 독립적으로 동작합니다.
-   - BNK 프로젝트에서는 Spring DI/XML 주입으로 연결된 클래스의 import가 없어
-     import-chasing이 작동하지 않으므로, call_stack 데이터를 직접 사용합니다.
-   - access_files -> SVC 식별 -> call_stack 시작점 매칭 -> 하위 BIZ 수집.
+   - call_stack 데이터를 사용하여 context 구성에 직접 적용합니다.
+   - access_files -> Controller 식별 -> call_stack 시작점 매칭 -> 하위 Service 수집.
 
-2. create_batches(): BIZ 메서드 레벨 토큰 계산
-   - BIZ 파일은 call_stack 기반 메서드 단위로 토큰을 계산하여 배치 분할 최적화.
+2. create_batches(): Service 메서드 레벨 토큰 계산
+   - Service 파일은 call_stack 기반 메서드만으로 토큰을 계산하여 배치 분할 최적화.
 """
 
 import json
 import logging
+import os
 from pathlib import Path
+from collections import defaultdict
 from typing import Dict, List, Optional, Set
 
 from config.config_manager import Configuration
@@ -29,15 +30,13 @@ from parser.java_ast_parser import JavaASTParser
 logger = logging.getLogger(__name__)
 
 
-class AnyframeRps2ContextGenerator(BaseContextGenerator):
-    """BNK 온라인 전용 Context Generator
+class MybatisWmContextGenerator(BaseContextGenerator):
+    """Mybatis WM Context Generator
 
-    call_stack 데이터를 직접 사용하여 SVC -> BIZ 그룹핑을 수행합니다.
-    AnyframeContextGenerator(import-chasing)와 독립적으로 동작하며,
-    access_files에서 SVC를 찾고 call_stack 시작점이 일치하는 BIZ를 수집합니다.
+    Groups files based on import relationships between Controller and Service layers.
     """
 
-    # VO 파일 최대 토큰 예산 (AnyframeContextGenerator와 동일)
+    # VO 파일 최대 토큰 예산 (80k = 128k 모델의 ~62%. 출력용 48k 여유)
     MAX_VO_TOKENS = 80000
 
     # 토큰 제한 사용 여부 (False로 설정하면 모든 VO 파일 포함)
@@ -62,10 +61,10 @@ class AnyframeRps2ContextGenerator(BaseContextGenerator):
 
         """
         알고리즘:
-        1. access_files에서 SVC 파일 식별
-        2. 각 SVC 기준으로 모든 sql_queries 순회
-        3. call_stack 시작이 현재 SVC와 같으면 하위 BIZ를 수집
-        4. SVCImpl + SVC Interface + BIZ 파일 그룹 생성
+        1. access_files에서 Controller 파일 식별
+        2. 각 Controller 기준으로 모든 sql_queries 순회
+        3. call_stack 시작이 현재 Controller와 같으면 하위 Service를 수집
+        4. Controller + Service/ServiceImpl 파일 그룹 생성
         5. VO 파일 선택 (import 기반)
         6. 배치 생성
         """
@@ -73,188 +72,130 @@ class AnyframeRps2ContextGenerator(BaseContextGenerator):
         self.table_access_info = table_access_info
 
         if not table_access_info:
-            logger.warning("table_access_info가 없습니다. (banka는 항상 필요)")
+            logger.error("table_access_info가 없습니다. (wm은 항상 필요)")
             return []
 
         # --- STEP 1: 레이어별 파일 추출 (부모와 동일) ---
-        # classify_layer에서 "svc"/"svcimpl"을 판정하고 _find_upper_layer_files에서
-        # lower()로 변환하므로 "svc"와 "svcimpl" 키가 별도로 존재합니다.
-        # 두 키를 병합하여 SVC interface + SVC impl을 모두 포함합니다.
-        svc_files_raw = layer_files.get("svc", []) + layer_files.get("svcimpl", [])
-        biz_files_raw = layer_files.get("biz", [])
+        controller_files_raw = layer_files.get("controller", [])
+        service_files_raw = layer_files.get("service", [])
         repository_files = layer_files.get("repository", [])
-        dem_daq_files = layer_files.get("dem_daq", [])
 
-        # BIZ stem 필터 (Util 제외, 대소문자 무시)
-        biz_files = [f for f in biz_files_raw if Path(f).stem.upper().endswith("BIZ")]
-
-        # SVC 분류
-        svc_files_all = []
-        for x in svc_files_raw:
-            if not (
-                x.endswith("VO.java")
-                or x.endswith("SVO.java")
-                or x.endswith("DVO.java")
-            ):
-                svc_files_all.append(x)
-
-        svc_impl_files = [x for x in svc_files_all if x.endswith("Impl.java")]
-        svc_interface_files = [x for x in svc_files_all if not x.endswith("Impl.java")]
+        service_impl_files = [x for x in service_files_raw if x.endswith("Impl.java")]
+        service_interface_files = [x for x in service_files_raw if not x.endswith("Impl.java")]
 
         # VO 파일
-        svc_vo_files = []
-        for x in svc_files_raw:
-            if x.endswith("VO.java") or x.endswith("SVO.java") or x.endswith("DVO.java"):
-                svc_vo_files.append(x)
+        vo_files = [x for x in repository_files if x.endswith("VO.java")]
 
-        all_repository = repository_files + svc_vo_files
-        vo_files = []
-        for x in all_repository:
-            if x.endswith("VO.java") or x.endswith("SVO.java") or x.endswith("DVO.java"):
-                vo_files.append(x)
-
-        # DQM (DQM/DEM, VO import 수집용)
-        dqm_files = [x for x in dem_daq_files if "/dqm/" in x or "/dem/" in x or x.endswith("DQM.java") or x.endswith("DEM.java")]
+        # Mapper 파일
+        mapper_files = [x for x in repository_files if x.endswith("Mapper.java")]
 
         # --- STEP 2: class_name -> file_path 매핑 ---
-        impl_name_to_path = {Path(f).stem: f for f in svc_impl_files}
-        interface_name_to_path = {Path(f).stem: f for f in svc_interface_files}
-        biz_name_to_path = {Path(f).stem: f for f in biz_files}
-        dxm_name_to_path = {Path(f).stem: f for f in dqm_files}
+        controller_name_to_path = {Path(f).stem: f for f in controller_files_raw}
+        service_ifc_name_to_path = {Path(f).stem: f for f in service_interface_files}
+        service_impl_name_to_path = {Path(f).stem: f for f in service_impl_files}
+        mapper_name_to_path = {Path(f).stem: f for f in mapper_files}
 
-        # SVC 전체 (interface + impl) 매칭
-        svc_name_to_path: Dict[str, str] = {}
-        svc_name_to_path.update(interface_name_to_path)
-        svc_name_to_path.update(impl_name_to_path)
+        # Service 전체 (interface + impl) 매칭
+        service_name_to_path: Dict[str, str] = {}
+        service_name_to_path.update(service_ifc_name_to_path)
+        service_name_to_path.update(service_impl_name_to_path)
 
-        # --- STEP 3: access_files에서 SVC 파일 식별 ---
+        # --- STEP 3: access_files에서 Controller 파일 식별 ---
         access_files = table_access_info.access_files
-        svc_in_access: List[str] = []
+        controller_in_access: List[str] = []
         for af in access_files:
             stem = Path(af).stem
-            if stem in svc_name_to_path:
-                svc_in_access.append(stem)
+            if stem in controller_name_to_path:
+                controller_in_access.append(stem)
 
-        # SVCImpl과 SVC Interface 구분
-        svc_impl_names = [s for s in svc_in_access if s in impl_name_to_path]
-        svc_intf_names = [s for s in svc_in_access if s in interface_name_to_path]
-
-        # anchor는 SVCImpl 기준 (없으면 SVC Interface)
-        anchor_names = svc_impl_names if svc_impl_names else svc_intf_names
+        # anchor는 Controller 기준
+        anchor_names = controller_in_access
 
         if not anchor_names:
-            logger.warning(
-                "access_files에서 SVC 파일을 찾을 수 없습니다. "
+            logger.error(
+                "access_files에서 Controller 파일을 찾을 수 없습니다. "
                 "call_stack 기반 그룹핑을 수행할 수 없습니다."
             )
             return []
 
-        logger.info(f"call_stack 기반 그룹핑 시작: anchor SVC {len(anchor_names)}개")
+        logger.info(f"call_stack 기반 그룹핑 시작: anchor Controller {len(anchor_names)}개")
 
-        # --- STEP 4: 각 SVC [SVC, DXM] 기준으로 call_stack 순회 -> BIZ 수집 ---
-        impl_to_biz_names: Dict[tuple, Set[str]] = {}
-        impl_to_svc_names: Dict[tuple, Set[str]] = {}
-        impl_to_dqm_names: Dict[tuple, Set[str]] = {}
+        # --- STEP 4: 각 Controller 기준으로 call_stack 순회 -> Service 수집 ---
+        impl_to_controller_names: Dict[str, Set[str]] = {}
+        impl_to_service_names: Dict[str, Set[str]] = {}
+        impl_to_mapper_names: Dict[str, Set[str]] = {}
 
-        for svc_name in anchor_names:
+        for controller_name in anchor_names:
+            impl_to_controller_names.setdefault(controller_name, set())
+            impl_to_service_names.setdefault(controller_name, set())
+            impl_to_mapper_names.setdefault(controller_name, set())
+
             for sq in table_access_info.sql_queries:
                 for cs in sq.get("call_stacks", []):
                     if not isinstance(cs, list) or not cs:
                         continue
 
-                    # call_stack 시작이 현재 SVC와 같은지 확인 (첫 2개 entry)
-                    cs_starts_with_this_svc = False
+                    # call_stack 시작이 현재 Controller와 같은지 확인 (첫 2개 entry)
+                    cs_starts_with_this_controller = False
                     for entry in cs[:2]:
                         if not isinstance(entry, str) or "." not in entry:
                             continue
                         entry_class = entry.split(".")[0]
-                        if entry_class == svc_name:
-                            cs_starts_with_this_svc = True
+                        if entry_class == controller_name:
+                            cs_starts_with_this_controller = True
                             break
 
-                        # SVCImpl <-> SVC Interface 페어링 체크
-                        if entry_class in impl_name_to_path or entry_class in interface_name_to_path:
-                            pair_candidates = self._get_svc_pair_candidates(entry_class)
-                            if svc_name in pair_candidates:
-                                cs_starts_with_this_svc = True
-                                break
-
-                    if not cs_starts_with_this_svc:
+                    if not cs_starts_with_this_controller:
                         continue
 
-                    # 현재 call_stack 내의 DXM (DQM/DEM) 식별
-                    dxm_name = None
-                    for entry in cs:
-                        if not isinstance(entry, str) or "." not in entry:
-                            continue
-                        class_name = entry.split(".")[0]
-                        if class_name in dxm_name_to_path or class_name.endswith(("DQM", "DEM")):
-                            dxm_name = class_name
-                            break
-
-                    if not dxm_name:
-                        dxm_name = "UNKNOWN_DXM"
-
-                    anchor_pair = (svc_name, dxm_name)
-                    if anchor_pair not in impl_to_biz_names:
-                        impl_to_biz_names[anchor_pair] = set()
-                        impl_to_svc_names[anchor_pair] = set()
-                        impl_to_dqm_names[anchor_pair] = set()
-
-                    # 이 call_stack의 모든 entry에서 BIZ/SVC 분류
+                    # 이 call_stack의 모든 entry에서 Service/Mapper 분류
                     for entry in cs:
                         if not isinstance(entry, str) or "." not in entry:
                             continue
                         class_name = entry.split(".")[0]
 
-                        if class_name in biz_name_to_path:
-                            impl_to_biz_names[anchor_pair].add(class_name)
-                        elif class_name in interface_name_to_path or class_name in impl_name_to_path:
-                            impl_to_svc_names[anchor_pair].add(class_name)
+                        if class_name in controller_name_to_path:
+                            impl_to_controller_names[controller_name].add(class_name)
+                        elif class_name in service_name_to_path:
+                            impl_to_service_names[controller_name].add(class_name)
+                        elif class_name in mapper_name_to_path:
+                            impl_to_mapper_names[controller_name].add(class_name)
 
         # --- STEP 5: 파일 그룹 생성 ---
         java_parser = JavaASTParser()
-        file_groups: Dict[tuple, List[str]] = {}
-        context_file_groups: Dict[tuple, List[str]] = {}
+        file_groups: Dict[str, List[str]] = {}
+        context_file_groups: Dict[str, List[str]] = {}
 
-        for anchor_pair, biz_names in impl_to_biz_names.items():
-            svc_name, dxm_name = anchor_pair
-            svc_path = svc_name_to_path.get(svc_name)
-            if not svc_path:
+        for controller_name in anchor_names:
+            controller_path = controller_name_to_path.get(controller_name)
+            service_names = impl_to_service_names.get(controller_name, set())
+
+            if not controller_path:
                 continue
 
-            file_group_paths: List[str] = [svc_path]
+            file_group_paths: List[str] = [controller_path]
 
-            # SVC Interface/Impl 페어 추가 (call_stack에서 찾은 것)
-            svc_names_from_cs = impl_to_svc_names.get(anchor_pair, set())
-            for paired_name in svc_names_from_cs:
-                paired_path = svc_name_to_path.get(paired_name)
-                if paired_path and paired_path not in file_group_paths:
-                    file_group_paths.append(paired_path)
-
-            # BIZ 파일 추가 (call_stack에서 직접 추출)
-            matched_biz_files: List[str] = []
-            for biz_name in sorted(list(biz_names)):
-                biz_path = biz_name_to_path.get(biz_name)
-                if biz_path:
-                    matched_biz_files.append(biz_path)
+            # Service Interface/Impl 페어 추가 (call_stack에서 찾은 것)
+            matched_services_files: List[str] = []
+            for service_name in sorted(list(service_names)):
+                service_path = service_name_to_path.get(service_name)
+                if service_path:
+                    matched_services_files.append(service_path)
                 else:
-                    logger.warning(f"call_stack BIZ '{biz_name}' not found in layer_files")
+                    logger.warning(f"call_stack Service '{service_name}' not found in layer_files")
 
-            file_group_paths.extend(matched_biz_files)
+            file_group_paths.extend(matched_services_files)
 
-            # DXM 파일 확인 (DXM은 대상 파일이 아닌 컨텍스트 파일로 추가)
-            dxm_path = None
-            if dxm_name and dxm_name != "UNKNOWN_DXM":
-                dxm_path = dxm_name_to_path.get(dxm_name)
+            # Mapper 파일 제외 (SQL 쿼리 접근 클래스이므로 수정 대상 아님)
+            file_group_paths = [
+                fp
+                for fp in file_group_paths
+                if not Path(fp).stem.endswith("Mapper")
+            ]
 
-            # VO 선택: 그룹 내 파일 및 DXM 파일에서 import 수집
+            # VO 선택: 그룹 내 파일 + imports 기반
             all_imports_for_vo: Set[str] = set()
-            paths_for_imports = list(file_group_paths)
-            if dxm_path:
-                paths_for_imports.append(dxm_path)
-
-            for fp in paths_for_imports:
+            for fp in file_group_paths:
                 try:
                     tree, error = java_parser.parse_file(Path(fp))
                     if not error:
@@ -265,55 +206,52 @@ class AnyframeRps2ContextGenerator(BaseContextGenerator):
                 except Exception:
                     pass
 
+            # Mapper imports도 VO 선택에 포함
+            for mapper_name in impl_to_mapper_names.get(controller_name, set()):
+                mapper_path = mapper_name_to_path.get(mapper_name)
+                if mapper_path:
+                    try:
+                        tree, error = java_parser.parse_file(Path(mapper_path))
+                        if not error:
+                            classes = java_parser.extract_class_info(tree, Path(mapper_path))
+                            if classes:
+                                cls = next((c for c in classes if c.access_modifier == "public"), classes[0])
+                                all_imports_for_vo.update(cls.imports)
+                    except Exception:
+                        pass
+
             vo_group_paths = self._select_vo_files_by_token_budget(
                 vo_files=vo_files,
-                all_imports=all_imports_for_vo,
+                all_imports=list(all_imports_for_vo),
                 max_tokens=self.MAX_VO_TOKENS,
             )
 
-            if dxm_path and dxm_path not in vo_group_paths:
-                vo_group_paths.insert(0, dxm_path)
-
             logger.info(
-                f"({svc_name}, {dxm_name}): SVC={len([p for p in file_group_paths if p not in matched_biz_files])}, "
-                f"BIZ={len(matched_biz_files)}, BIZ List={','.join(sorted(biz_names))}, "
-                f"VO={len(vo_group_paths) - (1 if dxm_path else 0)}"
+                f"{controller_name}: Controller={len([p for p in file_group_paths if p not in matched_services_files])}, "
+                f"Service={len(matched_services_files)}, Service List={','.join(sorted(service_names))}, "
+                f"VO={len(vo_group_paths)}"
             )
 
-            file_groups[anchor_pair] = file_group_paths
-            context_file_groups[anchor_pair] = vo_group_paths
+            file_groups[controller_name] = file_group_paths
+            context_file_groups[controller_name] = vo_group_paths
 
         # --- STEP 6: 배치 생성 ---
         all_batches: List[ModificationContext] = []
-        for anchor_pair, file_group_paths in file_groups.items():
+        for controller_name, file_group_paths in file_groups.items():
             if not file_group_paths:
                 continue
-            vo_files_for_group = context_file_groups.get(anchor_pair, [])
+            vo_files_for_group = context_file_groups.get(controller_name, [])
             batches = self.create_batches(
                 file_paths=file_group_paths,
                 table_name=table_name,
                 columns=columns,
                 layer="",
                 context_files=vo_files_for_group,
-                anchor_pair=f"{anchor_pair[0]}-{anchor_pair[1]}"
             )
             all_batches.extend(batches)
 
         logger.info(f"=== Total Batches Created: {len(all_batches)} ===")
         return all_batches
-
-    def _get_svc_pair_candidates(self, class_name: str) -> Set[str]:
-        """SVCImpl <-> SVC Interface 페어링 후보를 반환합니다."""
-        candidates: Set[str] = {class_name}
-        if class_name.endswith("Impl"):
-            base = class_name[:-4]  # Impl 제거
-            candidates.add(base)
-            candidates.add("I" + base)
-        else:
-            if class_name.startswith("I") and len(class_name) > 1:
-                candidates.add(class_name[1:] + "Impl")
-            candidates.add(class_name + "Impl")
-        return candidates
 
     # ========== create_batches 오버라이드 ==========
 
@@ -326,10 +264,10 @@ class AnyframeRps2ContextGenerator(BaseContextGenerator):
         context_files: List[str] = None,
         anchor_pair: str = None
     ) -> List[ModificationContext]:
-        """BIZ 파일은 메서드 레벨 토큰으로 계산하여 배치 분할
+        """Service 파일은 메서드 레벨 토큰으로 계산하여 배치 분할
 
         BaseContextGenerator.create_batches()와 동일한 배치 분할 로직이지만,
-        BIZ 파일의 토큰을 전체 파일 대신 call_stack 참조 메서드만으로 계산합니다.
+        Service 파일의 토큰을 전체 파일 대신 call_stack 참조 메서드만으로 계산합니다.
 
         table_access_info가 없으면 BaseContextGenerator의 전체 파일 기반 로직으로 fallback.
         """
@@ -378,9 +316,9 @@ class AnyframeRps2ContextGenerator(BaseContextGenerator):
                     logger.warning(f"File not found during batch creation: {file_path}")
                     continue
 
-                # --- 핵심 차이: BIZ 파일은 메서드만으로 토큰 계산 ---
-                if self._is_biz_file(file_path):
-                    content = self._get_biz_method_content(file_path, raw_call_stacks)
+                # --- 핵심 차이: Service 파일은 메서드만으로 토큰 계산 ---
+                if self._is_service_file(file_path):
+                    content = self._get_service_method_content(file_path, raw_call_stacks)
                 else:
                     with open(path_obj, "r", encoding="utf-8") as f:
                         content = f.read()
@@ -404,7 +342,6 @@ class AnyframeRps2ContextGenerator(BaseContextGenerator):
                         columns=columns,
                         layer=layer,
                         context_files=context_files,
-                        anchor_pair=anchor_pair
                     )
                 )
                 current_paths = [file_path]
@@ -421,33 +358,23 @@ class AnyframeRps2ContextGenerator(BaseContextGenerator):
                     columns=columns,
                     layer=layer,
                     context_files=context_files,
-                    anchor_pair=anchor_pair
                 )
             )
 
-        logger.info(f"({len(file_paths)} files) into {len(batches)} batches"
-                    f"(BIZ method-level token estimation).")
         return batches
 
-    # ========== BIZ 메서드 추출 헬퍼 ==========
+    # ========== Service 메서드 추출 헬퍼 ==========
 
-    def _is_biz_file(self, file_path: str) -> bool:
-        """BIZ 파일 여부 판별 - stem이 'BIZ'로 끝나는 파일만
-
-        Util 파일(BIZUtil, StringUtil 등)은 제외합니다.
-        """
-        return Path(file_path).stem.upper().endswith("BIZ")
+    def _is_service_file(self, file_path: str) -> bool:
+        """Service 파일 여부 판별 - stem이 'Service' 또는 'ServiceImpl'로 끝나는 파일만"""
+        return Path(file_path).stem.upper().endswith("SERVICEIMPL") or Path(file_path).stem.upper().endswith("SERVICE")
 
     def _extract_raw_call_stacks(
         self,
         file_paths: List[str],
         table_access_info: TableAccessInfo,
     ) -> List[List[str]]:
-        """call_stacks를 List[List[str]]로 반환합니다.
-
-        base_code_generator_get_callstacks_from_table_access_info()와
-        동일한 필터링 로직이지만, JSON 문자열 대신 원본 리스트를 반환합니다.
-        """
+        """call_stacks를 List[List[str]]로 반환합니다."""
         call_stacks_list: List[List[str]] = []
         file_class_names = [Path(fp).stem for fp in file_paths]
 
@@ -493,26 +420,22 @@ class AnyframeRps2ContextGenerator(BaseContextGenerator):
 
         return target_methods
 
-    def _get_biz_method_content(
+    def _get_service_method_content(
         self,
         file_path: str,
         raw_call_stacks: List[List[str]]
     ) -> str:
-        """BIZ 파일에서 call_stack 참조 메서드만 추출하여 텍스트 반환합니다.
-
-        토큰 계산용으로 순수 메서드 코드만 반환합니다.
-        매칭 메서드 없으면 전체 파일 내용을 반환합니다 (fallback).
-        """
+        """Service 파일에서 call_stack 참조 메서드만 추출하여 텍스트 반환합니다."""
         target_methods = self._get_target_methods_for_file(file_path, raw_call_stacks)
 
         if not target_methods:
-            logger.debug(f"BIZ 파일에 call_stack 메서드 없음, 전체 포함: {Path(file_path).name}")
+            logger.debug(f"Service 파일에 call_stack 메서드 없음, 전체 포함: {Path(file_path).name}")
             return self._read_full_file(file_path)
 
         # JavaASTParser로 메서드 정보 획득
         tree, error = self.java_parser.parse_file(Path(file_path))
         if error:
-            logger.warning(f"BIZ 파일 파싱 실패, 전체 포함: {Path(file_path).name} - {error}")
+            logger.warning(f"Service 파일 파싱 실패, 전체 포함: {Path(file_path).name} - {error}")
             return self._read_full_file(file_path)
 
         classes = self.java_parser.extract_class_info(tree, Path(file_path))
@@ -527,7 +450,7 @@ class AnyframeRps2ContextGenerator(BaseContextGenerator):
                     )
 
         if not method_ranges:
-            logger.debug(f"BIZ 파일에서 매칭 메서드 없음, 전체 포함: {Path(file_path).name}")
+            logger.debug(f"Service 파일에서 매칭 메서드 없음, 전체 포함: {Path(file_path).name}")
             return self._read_full_file(file_path)
 
         # 파일에서 해당 라인만 추출
@@ -535,7 +458,7 @@ class AnyframeRps2ContextGenerator(BaseContextGenerator):
             with open(file_path, "r", encoding="utf-8") as f:
                 all_lines = f.readlines()
         except Exception as e:
-            logger.warning(f"BIZ 파일 읽기 실패: {file_path} - {e}")
+            logger.warning(f"Service 파일 읽기 실패: {file_path} - {e}")
             return ""
 
         extracted_parts: List[str] = []
@@ -554,7 +477,7 @@ class AnyframeRps2ContextGenerator(BaseContextGenerator):
             logger.warning(f"파일 읽기 실패: {file_path} - {e}")
             return ""
 
-    # ========== VO 선택 관련 메서드 (AnyframeContextGenerator에서 복사) ==========
+    # ========== VO 선택 관련 메서드 ==========
 
     def _match_import_to_file_path(
         self, import_statement: str, target_files: List[str]
@@ -565,7 +488,7 @@ class AnyframeRps2ContextGenerator(BaseContextGenerator):
 
         for file_path in target_files:
             file_path_obj = Path(file_path)
-            if file_path_obj.stem != expected_class_name:
+            if file_path_obj.stem != {expected_class_name}:
                 continue
 
             normalized_path = str(file_path_obj).replace("\\", "/")

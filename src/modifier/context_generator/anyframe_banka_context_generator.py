@@ -8,10 +8,10 @@ BNK 온라인 타입 전용 Context Generator입니다.
    - AnyframeContextGenerator(import-chasing)와 독립적으로 동작합니다.
    - BNK 프로젝트에서는 Spring DI/XML 주입으로 연결된 클래스의 import가 없어
      import-chasing이 작동하지 않으므로, call_stack 데이터를 직접 사용합니다.
-   - access_files → SVC 식별 → call_stack 시작점 매칭 → 하위 BIZ 수집.
+   - access_files -> SVC 식별 -> call_stack 시작점 매칭 -> 하위 BIZ 수집.
 
 2. create_batches(): BIZ 메서드 레벨 토큰 계산
-   - BIZ 파일은 call_stack 기반 메서드만으로 토큰을 계산하여 배치 분할 최적화.
+   - BIZ 파일은 call_stack 기반 메서드 단위로 토큰을 계산하여 배치 분할 최적화.
 """
 
 import json
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 class AnyframeBankaContextGenerator(BaseContextGenerator):
     """BNK 온라인 전용 Context Generator
 
-    call_stack 데이터를 직접 사용하여 SVC→BIZ 그룹핑을 수행합니다.
+    call_stack 데이터를 직접 사용하여 SVC -> BIZ 그룹핑을 수행합니다.
     AnyframeContextGenerator(import-chasing)와 독립적으로 동작하며,
     access_files에서 SVC를 찾고 call_stack 시작점이 일치하는 BIZ를 수집합니다.
     """
@@ -45,8 +45,8 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
 
     def __init__(self, config: Configuration, code_generator: BaseCodeGenerator):
         super().__init__(config, code_generator)
-        self._java_parser = JavaASTParser()
-        self._table_access_info: Optional[TableAccessInfo] = None
+        self.java_parser = JavaASTParser()
+        self.table_access_info: Optional[TableAccessInfo] = None
 
     # ========== generate 오버라이드 (call_stack 기반) ==========
 
@@ -54,12 +54,13 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
         self,
         layer_files: Dict[str, List[str]],
         table_name: str,
-        columns: List[Dict],
+        columns: List[str],
         table_access_info: Optional[TableAccessInfo] = None,
-        endpoint_method: Optional[str] = None,
+        endpoint_method: Optional[str] = None
     ) -> List[ModificationContext]:
-        """call_stack 기반 파일 그룹핑으로 배치를 생성합니다.
+        """call_stack 기반 파일 그룹으로 배치를 생성합니다."""
 
+        """
         알고리즘:
         1. access_files에서 SVC 파일 식별
         2. 각 SVC 기준으로 모든 sql_queries 순회
@@ -67,40 +68,33 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
         4. SVCImpl + SVC Interface + BIZ 파일 그룹 생성
         5. VO 파일 선택 (import 기반)
         6. 배치 생성
-
-        table_access_info가 없으면 빈 리스트를 반환합니다 (banka는 항상 필요).
         """
-        self._table_access_info = table_access_info
+
+        self.table_access_info = table_access_info
 
         if not table_access_info:
-            logger.warning(
-                "table_access_info가 없습니다. "
-                "BNK 온라인 타입은 table_access_info가 필수입니다."
-            )
+            logger.warning("table_access_info가 없습니다. (banka는 항상 필요)")
             return []
 
-        # ═══ STEP 1: 레이어별 파일 추출 (부모와 동일) ═══
-        # classify_layer()가 "SVC"/"SVCImpl"을 반환하고 _find_upper_layer_files()에서
-        # .lower()로 변환되므로 "svc"와 "svcimpl" 키가 별도로 존재합니다.
-        # 두 키를 병합하여 SVC Interface + SVCImpl을 모두 포함합니다.
+        # --- STEP 1: 레이어별 파일 추출 (부모와 동일) ---
         svc_files_raw = layer_files.get("svc", []) + layer_files.get("svcimpl", [])
         biz_files_raw = layer_files.get("biz", [])
-        repository_files = layer_files.get("Repository", [])
+        repository_files = layer_files.get("repository", [])
         dem_daq_files = layer_files.get("dem_daq", [])
 
-        # BIZ stem 필터 (Util 제외, 대소문자 무시)
+        # BIZ stem 필터 (Util 제외)
         biz_files = [f for f in biz_files_raw if Path(f).stem.upper().endswith("BIZ")]
 
         # SVC 분류
-        svc_files_all = [
-            x
-            for x in svc_files_raw
+        svc_files_all = []
+        for x in svc_files_raw:
             if not (
                 x.endswith("VO.java")
                 or x.endswith("SVO.java")
                 or x.endswith("DVO.java")
-            )
-        ]
+            ):
+                svc_files_all.append(x)
+
         svc_impl_files = [x for x in svc_files_all if x.endswith("Impl.java")]
         svc_interface_files = [x for x in svc_files_all if not x.endswith("Impl.java")]
 
@@ -110,28 +104,28 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
             for x in svc_files_raw
             if x.endswith("VO.java") or x.endswith("SVO.java") or x.endswith("DVO.java")
         ]
+
         all_repository = repository_files + svc_vo_files
-        vo_files = [
-            x
-            for x in all_repository
-            if x.endswith("VO.java") or x.endswith("SVO.java") or x.endswith("DVO.java")
-        ]
+        vo_files = []
+        for x in all_repository:
+            if x.endswith("VO.java") or x.endswith("SVO.java") or x.endswith("DVO.java"):
+                vo_files.append(x)
 
         # DQM (VO import 수집용)
         dqm_files = [x for x in dem_daq_files if "/dqm/" in x or x.endswith("DQM.java")]
 
-        # ═══ STEP 2: class_name → file_path 매핑 ═══
+        # --- STEP 2: class_name -> file_path 매핑 ---
         impl_name_to_path = {Path(f).stem: f for f in svc_impl_files}
         interface_name_to_path = {Path(f).stem: f for f in svc_interface_files}
         biz_name_to_path = {Path(f).stem: f for f in biz_files}
         dqm_name_to_path = {Path(f).stem: f for f in dqm_files}
 
-        # SVC 전체 (interface + impl) 매핑
+        # SVC 전체 (interface + impl) 매칭
         svc_name_to_path: Dict[str, str] = {}
         svc_name_to_path.update(interface_name_to_path)
         svc_name_to_path.update(impl_name_to_path)
 
-        # ═══ STEP 3: access_files에서 SVC 파일 식별 ═══
+        # --- STEP 3: access_files에서 SVC 파일 식별 ---
         access_files = table_access_info.access_files
         svc_in_access: List[str] = []
         for af in access_files:
@@ -155,7 +149,7 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
 
         logger.info(f"call_stack 기반 그룹핑 시작: anchor SVC {len(anchor_names)}개")
 
-        # ═══ STEP 4: 각 SVC 기준으로 call_stack 순회 → BIZ 수집 ═══
+        # --- STEP 4: 각 SVC 기준으로 call_stack 순회 -> BIZ 수집 ---
         impl_to_biz_names: Dict[str, Set[str]] = {}
         impl_to_svc_names: Dict[str, Set[str]] = {}
         impl_to_dqm_names: Dict[str, Set[str]] = {}
@@ -179,11 +173,9 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
                         if entry_class == svc_name:
                             cs_starts_with_this_svc = True
                             break
-                        # SVCImpl ↔ SVC Interface 페어링 체크
-                        if (
-                            entry_class in impl_name_to_path
-                            or entry_class in interface_name_to_path
-                        ):
+
+                        # SVCImpl <-> SVC Interface 페어링 체크
+                        if entry_class in impl_name_to_path or entry_class in interface_name_to_path:
                             pair_candidates = self._get_svc_pair_candidates(entry_class)
                             if svc_name in pair_candidates:
                                 cs_starts_with_this_svc = True
@@ -200,20 +192,12 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
 
                         if class_name in biz_name_to_path:
                             impl_to_biz_names[svc_name].add(class_name)
-                        elif (
-                            class_name in interface_name_to_path
-                            and class_name != svc_name
-                        ):
-                            impl_to_svc_names[svc_name].add(class_name)
-                        elif (
-                            class_name in impl_name_to_path
-                            and class_name != svc_name
-                        ):
+                        elif class_name in interface_name_to_path or class_name in impl_name_to_path:
                             impl_to_svc_names[svc_name].add(class_name)
                         elif class_name in dqm_name_to_path:
                             impl_to_dqm_names[svc_name].add(class_name)
 
-        # ═══ STEP 5: 파일 그룹 생성 ═══
+        # --- STEP 5: 파일 그룹 생성 ---
         java_parser = JavaASTParser()
         file_groups: Dict[str, List[str]] = {}
         context_file_groups: Dict[str, List[str]] = {}
@@ -235,14 +219,13 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
 
             # BIZ 파일 추가 (call_stack에서 직접 추출)
             matched_biz_files: List[str] = []
-            for biz_name in sorted(biz_names):
+            for biz_name in sorted(list(biz_names)):
                 biz_path = biz_name_to_path.get(biz_name)
                 if biz_path:
                     matched_biz_files.append(biz_path)
                 else:
-                    logger.warning(
-                        f"call_stack BIZ '{biz_name}' not found in layer_files"
-                    )
+                    logger.warning(f"call_stack BIZ '{biz_name}' not found in layer_files")
+
             file_group_paths.extend(matched_biz_files)
 
             # DQM/DEM 파일 제외 (SQL 쿼리 접근 클래스이므로 수정 대상 아님)
@@ -258,17 +241,14 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
             ]
 
             # VO 선택: 그룹 내 파일 + DQM의 imports 기반
-            all_imports_for_vo: set = set()
+            all_imports_for_vo: Set[str] = set()
             for fp in file_group_paths:
                 try:
                     tree, error = java_parser.parse_file(Path(fp))
                     if not error:
                         classes = java_parser.extract_class_info(tree, Path(fp))
                         if classes:
-                            cls = next(
-                                (c for c in classes if c.access_modifier == "public"),
-                                classes[0],
-                            )
+                            cls = next((c for c in classes if c.access_modifier == "public"), classes[0])
                             all_imports_for_vo.update(cls.imports)
                 except Exception:
                     pass
@@ -280,38 +260,29 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
                     try:
                         tree, error = java_parser.parse_file(Path(dqm_path))
                         if not error:
-                            classes = java_parser.extract_class_info(
-                                tree, Path(dqm_path)
-                            )
+                            classes = java_parser.extract_class_info(tree, Path(dqm_path))
                             if classes:
-                                cls = next(
-                                    (
-                                        c
-                                        for c in classes
-                                        if c.access_modifier == "public"
-                                    ),
-                                    classes[0],
-                                )
+                                cls = next((c for c in classes if c.access_modifier == "public"), classes[0])
                                 all_imports_for_vo.update(cls.imports)
                     except Exception:
                         pass
 
             vo_group_paths = self._select_vo_files_by_token_budget(
                 vo_files=vo_files,
-                all_imports=all_imports_for_vo,
+                all_imports=list(all_imports_for_vo),
                 max_tokens=self.MAX_VO_TOKENS,
             )
 
             logger.info(
-                f"✓ {svc_name}: SVC={len([p for p in file_group_paths if p not in matched_biz_files])}, "
-                f"BIZ={len(matched_biz_files)} ({', '.join(sorted(biz_names))}), "
+                f"{svc_name}: SVC={len([p for p in file_group_paths if p not in matched_biz_files])}, "
+                f"BIZ={len(matched_biz_files)}, BIZ List={','.join(sorted(biz_names))}, "
                 f"VO={len(vo_group_paths)}"
             )
 
             file_groups[svc_name] = file_group_paths
             context_file_groups[svc_name] = vo_group_paths
 
-        # ═══ STEP 6: 배치 생성 ═══
+        # --- STEP 6: 배치 생성 ---
         all_batches: List[ModificationContext] = []
         for svc_name, file_group_paths in file_groups.items():
             if not file_group_paths:
@@ -330,21 +301,21 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
         return all_batches
 
     def _get_svc_pair_candidates(self, class_name: str) -> Set[str]:
-        """SVCImpl ↔ SVC Interface 페어링 후보를 반환합니다.
+        """SVCImpl <-> SVC Interface 페어링 후보를 반환합니다.
 
-        예: IAIBslDoc040570SVCImpl → {IAIBslDoc040570SVC, IIAIBslDoc040570SVC}
-            IAIBslDoc040570SVC → {IAIBslDoc040570SVCImpl}
+        예: IAlBslDoc040570SVCImpl -> {IAlBslDoc040570SVC, IAlBslDoc040570SVCImpl}
+            IAlBslDoc040570SVC -> {IAlBslDoc040570SVCImpl}
         """
-        candidates: Set[str] = set()
+        candidates: Set[str] = {class_name}
         if class_name.endswith("Impl"):
             base = class_name[:-4]  # Impl 제거
             candidates.add(base)
             candidates.add("I" + base)
         else:
-            candidates.add(class_name + "Impl")
             # I 접두사 제거 시도
             if class_name.startswith("I") and len(class_name) > 1:
                 candidates.add(class_name[1:] + "Impl")
+            candidates.add(class_name + "Impl")
         return candidates
 
     # ========== create_batches 오버라이드 ==========
@@ -353,7 +324,7 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
         self,
         file_paths: List[str],
         table_name: str,
-        columns: List[Dict],
+        columns: List[str],
         layer: str = "",
         context_files: List[str] = None,
     ) -> List[ModificationContext]:
@@ -364,7 +335,7 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
 
         table_access_info가 없으면 BaseContextGenerator의 전체 파일 기반 로직으로 fallback.
         """
-        if not self._table_access_info:
+        if not self.table_access_info:
             return super().create_batches(
                 file_paths, table_name, columns, layer, context_files
             )
@@ -376,7 +347,7 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
 
         # call_stacks 추출
         raw_call_stacks = self._extract_raw_call_stacks(
-            file_paths, self._table_access_info
+            file_paths, self.table_access_info
         )
 
         batches: List[ModificationContext] = []
@@ -390,15 +361,15 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
             "columns": columns,
         }
         formatted_table_info = json.dumps(table_info, indent=2, ensure_ascii=False)
-        max_tokens = self._config.max_tokens_per_batch
+        max_tokens = self.config.max_tokens_per_batch
 
         input_empty_data = CodeGeneratorInput(
             file_paths=[], table_info=formatted_table_info, layer_name=layer
         )
 
-        empty_prompt = self._code_generator.create_prompt(input_empty_data)
-        empty_num_tokens = self._code_generator.calculate_token_size(empty_prompt)
-        separator_tokens = self._code_generator.calculate_token_size("\n\n")
+        empty_prompt = self.code_generator.create_prompt(input_empty_data)
+        empty_num_tokens = self.code_generator.calculate_token_size(empty_prompt)
+        separator_tokens = self.code_generator.calculate_token_size("\n\n")
 
         current_batch_tokens = empty_num_tokens
 
@@ -409,7 +380,7 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
                     logger.warning(f"File not found during batch creation: {file_path}")
                     continue
 
-                # ━━━ 핵심 차이: BIZ 파일은 메서드만으로 토큰 계산 ━━━
+                # --- 핵심 차이: BIZ 파일은 메서드만으로 토큰 계산 ---
                 if self._is_biz_file(file_path):
                     content = self._get_biz_method_content(file_path, raw_call_stacks)
                 else:
@@ -421,9 +392,7 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
                 continue
 
             snippet_formatted = f"=== File Path (Absolute): {file_path} ===\n{content}"
-            snippet_tokens = self._code_generator.calculate_token_size(
-                snippet_formatted
-            )
+            snippet_tokens = self.code_generator.calculate_token_size(snippet_formatted)
 
             tokens_to_add = snippet_tokens
             if current_paths:
@@ -435,7 +404,6 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
                         file_paths=current_paths,
                         table_name=table_name,
                         columns=columns,
-                        file_count=len(current_paths),
                         layer=layer,
                         context_files=context_files,
                     )
@@ -452,22 +420,17 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
                     file_paths=current_paths,
                     table_name=table_name,
                     columns=columns,
-                    file_count=len(current_paths),
                     layer=layer,
                     context_files=context_files,
                 )
             )
 
-        logger.info(
-            f"Split {len(file_paths)} files into {len(batches)} batches "
-            f"(BIZ method-level token estimation)."
-        )
         return batches
 
     # ========== BIZ 메서드 추출 헬퍼 ==========
 
     def _is_biz_file(self, file_path: str) -> bool:
-        """BIZ 파일 여부 판별 — stem이 'BIZ'로 끝나는 파일만 (대소문자 무시)
+        """BIZ 파일 여부 판별 - stem이 'BIZ'로 끝나는 파일만
 
         Util 파일(BIZUtil, StringUtil 등)은 제외합니다.
         """
@@ -480,7 +443,7 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
     ) -> List[List[str]]:
         """call_stacks를 List[List[str]]로 반환합니다.
 
-        base_code_generator._get_callstacks_from_table_access_info()와
+        base_code_generator_get_callstacks_from_table_access_info()와
         동일한 필터링 로직이지만, JSON 문자열 대신 원본 리스트를 반환합니다.
         """
         call_stacks_list: List[List[str]] = []
@@ -513,9 +476,9 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
     def _get_target_methods_for_file(
         self,
         file_path: str,
-        raw_call_stacks: List[List[str]],
+        raw_call_stacks: List[List[str]]
     ) -> Set[str]:
-        """call_stacks에서 특정 파일 클래스에 해당하는 메서드명을 수집합니다."""
+        """call_stacks에서 특정 파일 클래스에 해당되는 메서드명을 수집합니다."""
         class_name = Path(file_path).stem
         target_methods: Set[str] = set()
 
@@ -531,7 +494,7 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
     def _get_biz_method_content(
         self,
         file_path: str,
-        raw_call_stacks: List[List[str]],
+        raw_call_stacks: List[List[str]]
     ) -> str:
         """BIZ 파일에서 call_stack 참조 메서드만 추출하여 텍스트 반환합니다.
 
@@ -541,34 +504,28 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
         target_methods = self._get_target_methods_for_file(file_path, raw_call_stacks)
 
         if not target_methods:
-            logger.debug(
-                f"BIZ 파일에 call_stack 메서드 없음, 전체 포함: {Path(file_path).name}"
-            )
+            logger.debug(f"BIZ 파일에 call_stack 메서드 없음, 전체 포함: {Path(file_path).name}")
             return self._read_full_file(file_path)
 
         # JavaASTParser로 메서드 정보 획득
-        tree, error = self._java_parser.parse_file(Path(file_path))
+        tree, error = self.java_parser.parse_file(Path(file_path))
         if error:
-            logger.warning(
-                f"BIZ 파일 파싱 실패, 전체 포함: {Path(file_path).name} - {error}"
-            )
+            logger.warning(f"BIZ 파일 파싱 실패, 전체 포함: {Path(file_path).name} - {error}")
             return self._read_full_file(file_path)
 
-        classes = self._java_parser.extract_class_info(tree, Path(file_path))
+        classes = self.java_parser.extract_class_info(tree, Path(file_path))
 
         # 매칭 메서드의 라인 범위 수집
         method_ranges: List[tuple] = []
         for cls_info in classes:
-            for method in cls_info.methods:
-                if method.name in target_methods:
+            for method_name in cls_info.methods:
+                if method_name in target_methods:
                     method_ranges.append(
-                        (method.name, method.line_number, method.end_line_number)
+                        (method_name, method_name.line_number, method_name.end_line_number)
                     )
 
         if not method_ranges:
-            logger.debug(
-                f"BIZ 파일에서 매칭 메서드 없음, 전체 포함: {Path(file_path).name}"
-            )
+            logger.debug(f"BIZ 파일에서 매칭 메서드 없음, 전체 포함: {Path(file_path).name}")
             return self._read_full_file(file_path)
 
         # 파일에서 해당 라인만 추출
@@ -580,10 +537,9 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
             return ""
 
         extracted_parts: List[str] = []
-        for method_name, start_line, end_line in sorted(
-            method_ranges, key=lambda x: x[1]
-        ):
-            lines = all_lines[start_line - 1 : end_line]
+        for method_name, start_line, end_line in sorted(method_ranges, key=lambda x: x[1]):
+            # lines = all_lines[start_line - 1 : end_line]
+            lines = all_lines[start_line - 1: end_line]
             extracted_parts.append("".join(lines))
 
         return "\n\n".join(extracted_parts)
@@ -602,11 +558,10 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
     def _match_import_to_file_path(
         self, import_statement: str, target_files: List[str]
     ) -> Optional[str]:
-        """
-        import 문과 일치하는 파일을 target_files에서 찾습니다.
+        """import 문과 일치하는 파일을 target_files에서 찾습니다.
 
         Args:
-            import_statement: Java import 문 (예: "sli.gps.bc.biz.UserBIZ")
+            import_statement: Java import 문 (예: "sl.gps.bc.biz.UserBIZ")
             target_files: 매칭 대상 파일 목록
 
         Returns:
@@ -617,7 +572,6 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
 
         for file_path in target_files:
             file_path_obj = Path(file_path)
-
             if file_path_obj.stem != expected_class_name:
                 continue
 
@@ -630,7 +584,7 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
                     file_parts[i + j] == expected_path_parts[j]
                     for j in range(len(expected_path_parts) - 1)
                 ):
-                    if file_path_obj.stem == expected_class_name:
+                    if file_path_obj.stem == expected_path_parts[-1]:
                         match_found = True
                         break
 
@@ -642,11 +596,10 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
     def _select_vo_files_by_token_budget(
         self,
         vo_files: List[str],
-        all_imports: set,
+        all_imports: List[str],
         max_tokens: int,
     ) -> List[str]:
-        """
-        토큰 예산 내에서 VO 파일을 선택합니다.
+        """토큰 예산 내에서 VO 파일들을 선택합니다.
 
         Args:
             vo_files: 전체 VO 파일 목록
@@ -664,7 +617,6 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
                 matched = self._match_import_to_file_path(imp, vo_files)
                 if matched and matched not in selected_files:
                     selected_files.append(matched)
-            logger.info(f"VO 파일 선택 완료: {len(selected_files)}개")
             return selected_files
 
         for imp in all_imports:
@@ -673,7 +625,7 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
                 try:
                     with open(matched, "r", encoding="utf-8") as f:
                         content = f.read()
-                    file_tokens = self._calculate_token_size(content)
+                    file_tokens = self.calculate_token_size(content)
 
                     if current_tokens + file_tokens <= max_tokens:
                         selected_files.append(matched)
@@ -683,8 +635,4 @@ class AnyframeBankaContextGenerator(BaseContextGenerator):
                 except Exception as e:
                     logger.warning(f"VO 파일 읽기 실패: {matched} - {e}")
 
-        logger.info(
-            f"VO 파일 선택 완료: {len(selected_files)}개, "
-            f"총 {current_tokens:,} tokens (예산: {max_tokens:,})"
-        )
         return selected_files
